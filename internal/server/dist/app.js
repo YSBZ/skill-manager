@@ -59,6 +59,21 @@ async function openExternal(url) {
   }
 }
 
+// Any external http(s) link — including the static ones in the in-app guide —
+// must open in the system browser, never navigate THIS view. In the desktop
+// WKWebView a plain <a href> click replaces the whole app with the target site
+// and there is no browser chrome to go back (the reported bug). Delegate every
+// such click to openExternal; same behavior in the plain browser (opens a tab).
+document.addEventListener("click", (e) => {
+  const a = e.target.closest && e.target.closest("a[href]");
+  if (!a) return;
+  const href = a.getAttribute("href") || "";
+  if (/^https?:\/\//i.test(href)) {
+    e.preventDefault();
+    openExternal(href);
+  }
+});
+
 // confirmModal replaces the native confirm() with an in-page dialog. Returns a
 // Promise<bool>. okText/danger customize the confirm button.
 function confirmModal(msg, okText, danger) {
@@ -1501,7 +1516,6 @@ function renderOnlineSection(root, allLocal, enabledSel) {
       // 外链钉在卡片左下角（footer + margin-top:auto，同行卡片对齐）。
       const foot = ce("div", { className: "online-foot" });
       const link = ce("a", { href: r.url, textContent: mp ? "↗ skillsmp" : "↗ skills.sh", className: "online-link", title: "在系统浏览器中打开" });
-      link.onclick = (e) => { e.preventDefault(); openExternal(r.url); };
       foot.append(link);
       main.append(foot);
     }

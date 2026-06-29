@@ -261,10 +261,16 @@
 
           <div class="changelog">
             <div class="changelog-head">
-              <span class="cl-ver">v6.0.3</span>
-              <span class="cl-date">修复 Windows 自更新不生效（改用 cmd 批处理 + 脱离作业对象）· 更新于 2026-06-28</span>
+              <span class="cl-ver">v6.0.4</span>
+              <span class="cl-date">修复桌面端打开外部链接后无法返回 · 更新于 2026-06-29</span>
             </div>
             <div class="changelog-scroll">
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.4 · 修复桌面端外链劫持整个窗口、无法返回（2026-06-29）</div>
+              <ul>
+                <li><b>外链统一走系统浏览器</b>：桌面端(原生 WKWebView 窗口、无浏览器前进/后退栏)里点外部链接(skillsmp / skills.sh / 文档等)会把<b>整个 App 窗口</b>导航到目标站,且没有返回入口。改为全局拦截所有 <code>http(s)</code> 外链,一律在<b>系统浏览器</b>打开,App 窗口不再被跳走。网页版行为不变(照常开新标签)。</li>
+              </ul>
+            </div>
             <div class="cl-rel">
               <div class="cl-rel-head">v6.0.3 · 修复 Windows 一键更新「提示重启但没替换、没拉起」（2026-06-28）</div>
               <ul>

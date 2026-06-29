@@ -1,12 +1,12 @@
 {
-  "version": "6.0.3",
-  "notes": "桌面端在线更新（检查 + 一键自更新）+ Windows 自更新修复 + 导出修复。",
+  "version": "6.0.4",
+  "notes": "修复桌面端打开外部链接后整个窗口被劫持、无法返回（外链改为系统浏览器打开）。",
   "assets": {
-    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.3/SkillManager-desktop-macos-v6.0.3.zip",
-    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.3/SkillManager-desktop-windows-v6.0.3.zip"
+    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.4/SkillManager-desktop-macos-v6.0.4.zip",
+    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.4/SkillManager-desktop-windows-v6.0.4.zip"
   },
   "sha256": {
-    "desktop-macos": "43f66933f7a7d3c09057c88e221fee71d24acec1f9c67016d138a41c4c1cf12c",
-    "desktop-windows": "3aa1d81c47bce755c9530c1f512954301fe2d8f7a883f02a06122e55878ea57b"
+    "desktop-macos": "c2c99372362dd2d05da6d31021b4e865e92b03c8c9dce39b3589eb86047c8f1d",
+    "desktop-windows": "0f93cc5b620cdebdc251cfbeb261f2172da5f6ed3f064de7888e32d48c16e506"
   }
 }
