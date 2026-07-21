@@ -12,6 +12,7 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,11 +145,20 @@ func Guarded(dir string) bool {
 	return underOrEqual(r, system) || underOrEqual(r, vendor)
 }
 
-// IsCodexTarget reports whether dir is a Codex skill directory (personal or
-// project level). reconcile uses it to scope the nested-SKILL.md guard (KTD6)
-// to Codex targets only.
+// IsCodexTarget reports whether dir is a Codex skill directory. Codex reads
+// GLOBAL skills from ~/.codex/skills ($CODEX_HOME/skills) and PROJECT skills from
+// <repo>/.agents/skills. The user-level ~/.agents/skills is NOT Codex's — it is
+// npx (skills.sh)'s install store — so it is excluded here even though it shares
+// the /.agents/skills suffix. (Verified against real installs on disk: user
+// ~/.agents/skills holds npx skills, project dev/.agents/skills holds Codex's.)
+// reconcile uses this to scope the nested-SKILL.md guard (KTD6) to Codex targets.
 func IsCodexTarget(dir string) bool {
 	r := expand(dir)
+	if home, err := os.UserHomeDir(); err == nil {
+		if underOrEqual(r, filepath.Join(home, ".agents", "skills")) {
+			return false // user-level ~/.agents/skills is npx's store, not Codex's
+		}
+	}
 	if underOrEqual(r, codexSkillsRoot()) {
 		return true
 	}
@@ -197,21 +207,23 @@ func Scope(dir string) SkillScope {
 //	dir itself          — when the selection already is a cc/codex skills dir
 //	dir/skills          — when dir is a .claude/.codex home (e.g. ~/.claude)
 //	dir/.claude/skills  — cc, for a project or home root (e.g. a repo checkout)
-//	dir/.codex/skills   — codex
-//	dir/.agents/skills  — codex (project-level alternative to .codex/skills)
+//	dir/.agents/skills  — codex, where Codex reads PROJECT skills (preferred)
+//	dir/.codex/skills   — codex, legacy fallback (Codex doesn't read this at the
+//	                      project level; kept so existing setups still resolve)
 //
 // It returns the existing, non-guarded candidates — at most one per harness, so
-// a project root yields exactly one cc + one codex target (.codex/skills wins
-// over the .agents/skills alternative because it is probed first). Empty when
-// none apply, so the caller can fall back to adding the selection verbatim.
+// a project root yields exactly one cc + one codex target. .agents/skills is
+// probed BEFORE .codex/skills so a project's Codex target lands on .agents/skills
+// (where Codex actually reads project skills). Empty when none apply, so the
+// caller can fall back to adding the selection verbatim.
 func SkillDirsFor(dir string) []string {
 	base := expand(dir)
 	cands := []string{
 		base,
 		filepath.Join(base, "skills"),
 		filepath.Join(base, ".claude", "skills"),
-		filepath.Join(base, ".codex", "skills"),
 		filepath.Join(base, ".agents", "skills"),
+		filepath.Join(base, ".codex", "skills"),
 	}
 	var out []string
 	seenHarness := map[Harness]bool{}
@@ -258,6 +270,88 @@ func ScaffoldSkillDirs(dir string) []string {
 		}
 	}
 	return created
+}
+
+// CreateSkillDirs scaffolds the requested harness skill dir(s) UNDER base and
+// returns them (canonical absolute). Unlike ScaffoldSkillDirs it deliberately
+// CREATES an absent agent home — the user explicitly opted in when a plain
+// folder was neither a CC nor a Codex dir. kinds are "cc" (→ base/.claude/skills)
+// and "codex" (→ base/.agents/skills, where Codex reads PROJECT skills). Unknown
+// kinds are ignored; base must not be guarded.
+func CreateSkillDirs(dir string, kinds []string) ([]string, error) {
+	base := expand(dir)
+	if Guarded(base) {
+		return nil, fmt.Errorf("directory is guarded")
+	}
+	sub := map[string]string{
+		"cc":    filepath.Join(".claude", "skills"),
+		"codex": filepath.Join(".agents", "skills"), // project-level Codex skills dir
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range kinds {
+		rel, ok := sub[k]
+		if !ok || seen[k] {
+			continue
+		}
+		seen[k] = true
+		p := filepath.Join(base, rel)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no valid harness to create")
+	}
+	return out, nil
+}
+
+// AncestorSkillDirs returns the EXISTING skill directories a runtime would ALSO
+// read for target's harness, BESIDES target itself — target's "inherited" levels.
+// The UI uses it to flag skills already provided from above so the user avoids
+// re-enabling them here. For a Codex target it walks parent dirs' .agents/skills
+// up to the filesystem root (the user-level ~/.agents/skills is npx's, excluded
+// by IsCodexTarget) and adds the user-global ~/.codex/skills; for a CC target it
+// adds the user-global ~/.claude/skills. A user-level target has no ancestors.
+// Nearest-first order. Pure path logic + existence check; it does not scan skills.
+func AncestorSkillDirs(target string) []string {
+	t := expand(target)
+	var out []string
+	seen := map[string]bool{t: true}
+	add := func(p string) {
+		p = expand(p)
+		if seen[p] || !dirExists(p) {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	switch {
+	case IsCodexTarget(t):
+		// Project-level <proj>/.agents/skills: Codex reads .agents/skills from every
+		// parent dir up to the fs root, so walk them. (IsCodexTarget skips the npx
+		// ~/.agents/skills, so it is never counted as inherited Codex.)
+		if strings.HasSuffix(t, filepath.FromSlash("/.agents/skills")) {
+			proj := filepath.Dir(filepath.Dir(t)) // <proj> from <proj>/.agents/skills
+			for {
+				parent := filepath.Dir(proj)
+				if parent == proj { // reached fs root
+					break
+				}
+				if c := filepath.Join(parent, ".agents", "skills"); IsCodexTarget(c) {
+					add(c)
+				}
+				proj = parent
+			}
+		}
+		add(codexSkillsRoot()) // user-global Codex
+	case Classify(t) == HarnessClaudeCode:
+		if home, err := os.UserHomeDir(); err == nil {
+			add(filepath.Join(home, ".claude", "skills")) // user-global CC
+		}
+	}
+	return out
 }
 
 // PluginRootFor returns the agent plugin tree associated with a skills dir: the

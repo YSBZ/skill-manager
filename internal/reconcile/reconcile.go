@@ -212,6 +212,15 @@ func collisionSkipSet(conflicts []linker.Conflict) map[linkKey]bool {
 	return skip
 }
 
+// DesiredLinks returns the links reconcile WOULD create for cfg without touching
+// disk — the planning half of Apply. Callers use it to learn a desired link's
+// Source (e.g. the archived copy) for a given target+name, such as when relinking
+// a target whose symlink diverged into a real path.
+func (r *Reconciler) DesiredLinks(cfg config.Config) []linker.DesiredLink {
+	d, _, _, _ := r.computeDesired(cfg)
+	return d
+}
+
 // computeDesired expands every enabled entry into desired links, scanning each
 // repo at most once. It also returns nested-SKILL.md conflicts for sources
 // mapped to a Codex target (KTD6) — produced here because the scanner.Skill

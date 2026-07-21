@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"skillmanage/internal/gitsync"
 	"skillmanage/internal/harness"
 	"skillmanage/internal/reconcile"
+	"skillmanage/internal/scanner"
 )
 
 const tokenPlaceholder = "__SM_TOKEN__"
@@ -42,6 +44,80 @@ type RepoStatus struct {
 	// Drift carries per-skill local-change detail when Dirty is set (新增/修改/
 	// 已提交未推送), so the UI can show what an update preserved and offer 快捷上传.
 	Drift gitsync.Drift `json:"drift,omitempty"`
+	// Changes lists which skills THIS sync pulled from upstream (added/updated/
+	// removed), so the UI can show the update content. Empty when nothing changed.
+	Changes []SkillChange `json:"changes,omitempty"`
+}
+
+// SkillChange is one skill added/updated/removed by a sync, derived from the git
+// diff between the pre- and post-sync commit.
+type SkillChange struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"` // "added" | "updated" | "removed"
+}
+
+// classifySkillChanges maps the repo-relative files a sync changed to skill-level
+// changes. A skill is the directory holding its SKILL.md; a changed file is
+// attributed to the nearest enclosing skill dir. A skill is "added" when its own
+// SKILL.md was added, "removed" when its SKILL.md was deleted and the dir is gone,
+// else "updated". Files under no skill (repo-level README, etc.) are ignored.
+func classifySkillChanges(repoDir string, files []gitsync.FileChange) []SkillChange {
+	if len(files) == 0 {
+		return nil
+	}
+	// Current skills → rel-dir(slash) → display name.
+	curDirs := map[string]string{}
+	if skills, err := scanner.Scan(repoDir); err == nil {
+		for _, sk := range skills {
+			if rel, err := filepath.Rel(repoDir, sk.Dir); err == nil {
+				curDirs[filepath.ToSlash(rel)] = sk.LinkName
+			}
+		}
+	}
+	owner := func(p string) (string, bool) { // longest current skill dir enclosing p
+		best := ""
+		for d := range curDirs {
+			if d == "." || p == d || strings.HasPrefix(p, d+"/") {
+				if len(d) > len(best) {
+					best = d
+				}
+			}
+		}
+		if best == "" {
+			return "", false
+		}
+		return best, true
+	}
+	kind := map[string]string{} // rel-dir → kind
+	name := map[string]string{} // rel-dir → display name
+	for _, f := range files {
+		p := filepath.ToSlash(f.Path)
+		if d, ok := owner(p); ok {
+			if _, seen := kind[d]; !seen {
+				kind[d], name[d] = "updated", curDirs[d]
+			}
+			if f.Status == "A" && p == d+"/SKILL.md" { // the skill itself is new
+				kind[d] = "added"
+			}
+		} else if f.Status == "D" && strings.HasSuffix(p, "/SKILL.md") {
+			d := strings.TrimSuffix(p, "/SKILL.md")
+			if _, still := curDirs[d]; !still { // dir gone → skill removed
+				kind[d] = "removed"
+				name[d] = d[strings.LastIndex(d, "/")+1:]
+			}
+		}
+	}
+	out := make([]SkillChange, 0, len(kind))
+	for d, k := range kind {
+		out = append(out, SkillChange{Name: name[d], Kind: k})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
 // isAuthError reports whether a git error message indicates a credentials/key
@@ -428,7 +504,7 @@ func (s *Server) SyncAll(ctx context.Context, force bool) reconcile.Summary {
 		name := reconcile.RepoName(repo.URL)
 		dir := filepath.Join(s.reposRoot, name)
 		res := s.syncRepoLocked(ctx, dir, repo.URL, gitsync.Options{Branch: repo.Branch, Force: force})
-		st := RepoStatus{URL: repo.URL, Branch: repo.Branch, Name: name, State: string(res.Action), Dirty: res.Dirty, Drift: res.Drift}
+		st := RepoStatus{URL: repo.URL, Branch: repo.Branch, Name: name, State: string(res.Action), Dirty: res.Dirty, Drift: res.Drift, Changes: classifySkillChanges(dir, res.Files)}
 		if res.Err != nil {
 			// Surface git's actual stderr (the useful part) — res.Err alone is just
 			// "exit status 128". Both feed auth detection.
@@ -491,7 +567,7 @@ func (s *Server) SyncOne(ctx context.Context, url string, force bool) reconcile.
 		// for manual git resolution rather than reset --hard. (The all-repos「全量更新」
 		// discard path lives in SyncAll, which leaves KeepLocal false.)
 		res := s.syncRepoLocked(ctx, dir, repo.URL, gitsync.Options{Branch: repo.Branch, Force: force, KeepLocal: true})
-		st = RepoStatus{URL: repo.URL, Branch: repo.Branch, Name: name, State: string(res.Action), Dirty: res.Dirty, Drift: res.Drift}
+		st = RepoStatus{URL: repo.URL, Branch: repo.Branch, Name: name, State: string(res.Action), Dirty: res.Dirty, Drift: res.Drift, Changes: classifySkillChanges(dir, res.Files)}
 		if res.Err != nil {
 			st.Error = res.Err.Error()
 			if e := strings.TrimSpace(res.Stderr); e != "" {

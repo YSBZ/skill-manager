@@ -118,8 +118,11 @@ const state = {
   invScope: "",
   invLoading: false,
   invError: "",
-  collapsedGroups: {}, // 目录现状各来源分组的「已收起」集合（key→true）。默认全部展开、各组独立切换，不再手风琴。
+  collapsedGroups: { plugin: true }, // 目录现状各来源分组的「已收起」集合（key→true）。默认除「插件」外全部展开（插件量大且全局只读，默认收起）；各组独立切换。
   dirSources: [], // 用户登记的本地目录源（status.localSources）：[{id,label,path,count}]
+  asideTab: "sources", // 左栏分段：sources（来源）| presets（分组）
+  collapsed: new Set(), // 来源分区折叠状态（key：git/npx/local），持久化到 localStorage 去拥挤
+  presets: [], // 分组（GET /api/presets）：[{name, skills:[{skill,mode}]}]
   activeTarget: undefined, // active 同步目录标签页 (one tab per dir)
   search: "",
   searchFold: { local: false, online: false }, // 搜索结果两区各自折叠状态（false=展开）
@@ -240,8 +243,7 @@ async function load(sync) {
   try { state.status = await api("GET", "/api/status"); }
   catch (e) { banner("加载失败：" + e.message, true); return; }
   state.npxAvailable = !!state.status.npxAvailable;
-  if (state.status.version) { // show the release in the header + tab title
-    const bv = $("#brand-ver"); if (bv) bv.textContent = "v" + state.status.version;
+  if (state.status.version) { // set only the tab/window title; header no longer shows a version
     document.title = "SkillManager v" + state.status.version;
   }
   try { state.targets = (await api("GET", "/api/targets")) || []; }
@@ -269,7 +271,9 @@ async function load(sync) {
   // skills.sh skill（第三方，可在「+ 添加」里链接进目标，selector 用 @agents/<name>）。
   try { state.skillsShSkills = (await api("GET", "/api/skillssh")) || []; }
   catch { state.skillsShSkills = []; }
+  await refreshPresets();
   renderStats(); renderRepos(); renderTabs(); renderSummary();
+  if (state.asideTab === "presets") renderPresets();
   await fetchInventory();
   // Record the just-rendered fingerprint so the background auto-sync can tell a
   // real out-of-band disk change from "nothing moved" and skip repainting otherwise.
@@ -440,14 +444,41 @@ function sourceDivider(label, actions, afterLabel) {
   return d;
 }
 
+// 来源分区折叠状态：持久化到 localStorage，默认全部展开、各分区独立切换（去拥挤）。
+function loadCollapsed() {
+  try { (JSON.parse(localStorage.getItem("sm.collapsedSources") || "[]") || []).forEach((k) => state.collapsed.add(k)); }
+  catch { /* localStorage 不可用时忽略 */ }
+}
+function saveCollapsed() {
+  try { localStorage.setItem("sm.collapsedSources", JSON.stringify([...state.collapsed])); } catch { /* 忽略 */ }
+}
+
+// sectionHead appends a collapsible source-section header to ul and returns true
+// when the section is collapsed (caller then skips its body cards). Header action
+// buttons keep working — clicking them does not toggle the section.
+function sectionHead(ul, key, label, actions, afterLabel) {
+  const collapsed = state.collapsed.has(key);
+  const d = sourceDivider(label, actions, afterLabel);
+  d.classList.add("section-head");
+  d.prepend(ce("span", { className: "sec-caret", textContent: collapsed ? "▸" : "▾" }));
+  d.onclick = (e) => {
+    if (e.target.closest("button")) return; // 标题行里的动作按钮保留各自行为
+    if (state.collapsed.has(key)) state.collapsed.delete(key); else state.collapsed.add(key);
+    saveCollapsed();
+    renderRepos();
+  };
+  ul.append(d);
+  return collapsed;
+}
+
 function renderRepos() {
   const ul = $("#repo-list"); ul.innerHTML = "";
-  // 三类源平级展示：git 仓 / npx skills / 本地源（都是「源」）。每类一个分隔标题，
-  // 该来源专属的动作放在标题行右侧。
-  // git 仓分区标题行：全量更新（仅 git）。说明统一在「使用指南」里，不再单独放 ?。
+  // 三类源平级展示：git 仓 / npx skills / 本地源（都是「源」）。每类一个可折叠分区，
+  // 该来源专属的动作放在标题行右侧；折叠状态持久化以去拥挤。
+  // —— git 仓 —— 标题行：全量更新（仅 git）。说明统一在「使用指南」里。
   const gitFullUpdate = ce("button", { className: "ghost small", textContent: "全量更新", title: "更新全部 git 仓：拉取上游并重新同步（不含 npx）；有本地改动会提示是否还原并更新" });
   gitFullUpdate.onclick = (e) => { e.stopPropagation(); updateNow(false); };
-  ul.append(sourceDivider("git 仓", [gitFullUpdate]));
+  if (!sectionHead(ul, "git", "git 仓", [gitFullUpdate])) {
   // 添加行：导出 / 导入 / 添加（「添加」点击打开弹窗输入 URL + 分支）。
   const addRow = ce("li", { className: "repo-addrow" });
   const gitExport = ce("button", { className: "ghost small", textContent: "导出", title: "导出 git 仓库列表（用于在另一台机器重建来源）" });
@@ -496,7 +527,7 @@ function renderRepos() {
       await load();
     };
     meta.append(rm); // 移除在左
-    const up = ce("button", { className: "ghost small", textContent: "同步仓库", title: "与上游同步该仓：无本地改动直接拉取更新；有改动（移动/删除/修改/新增）则弹窗选择上传内容（确认=更新并上传 / 仅更新）" });
+    const up = ce("button", { className: "ghost small", style: "white-space:nowrap", textContent: "同步仓库", title: "与上游同步该仓：无本地改动直接拉取更新；有改动（移动/删除/修改/新增）则弹窗选择上传内容（确认=更新并上传 / 仅更新）" });
     up.onclick = (e) => { e.stopPropagation(); repoUpdateFlow(repo, up); };
     meta.append(up); // 同步仓库在右
     li.append(meta);
@@ -504,6 +535,7 @@ function renderRepos() {
     if (repo.authHint) li.append(ce("div", { className: "repo-authhint", textContent: host ? "鉴权失败，无法自动更新：点上方「填写凭据」填个人令牌(PAT)，或改用 SSH。" : "鉴权失败，无法自动更新：私有仓需配置 SSH key（加入 ssh-agent）。详见标题旁 ? 指南。" }));
     ul.append(li);
   });
+  } // /git section
   // 目录源（别家管理）：skills.sh = vercel-labs/skills，canonical 在 ~/.agents/skills，
   // 归 npx skills 管。我们只读识别，更新转交其原生命令，绝不接管（第④不变式）。
   const sh = state.status.skillsSh;
@@ -515,7 +547,7 @@ function renderRepos() {
       npxUpdate.onclick = (e) => { e.stopPropagation(); updateSkillsShAll(npxUpdate); };
       npxActions = [npxUpdate];
     }
-    ul.append(sourceDivider("npx skills", npxActions));
+    if (!sectionHead(ul, "npx", "npx skills", npxActions)) {
     const shLi = ce("li", { className: "repo-card repo-skillssh clickable", title: "查看 npx skills 管理的 skill" });
     shLi.onclick = () => openSkillsShModal();
     const stop = ce("div", { className: "repo-top" });
@@ -532,6 +564,7 @@ function renderRepos() {
     }
     shLi.append(smeta);
     ul.append(shLi);
+    } // /npx section
   }
 
   // 本地源：同一类能力——都是「本地源」。区别只在来源：
@@ -540,7 +573,7 @@ function renderRepos() {
   // 「添加本地源」放在分区标题行右侧（选一个文件夹作为来源）。
   const addLocal = ce("button", { className: "ghost small", textContent: "添加本地源", title: "选择一个文件夹作为本地源（实时识别其中的 skill，不复制、不改动原文件）" });
   addLocal.onclick = openLocalSrcModal;
-  ul.append(sourceDivider("本地源", [addLocal]));
+  if (!sectionHead(ul, "local", "本地源", [addLocal])) {
   const localLi = ce("li", { className: "repo-card repo-local clickable", title: "查看本地（已备份）skill" });
   localLi.onclick = () => openRepoSkills(LOCAL_NS, { local: true });
   const ltop = ce("div", { className: "repo-top" });
@@ -581,6 +614,367 @@ function renderRepos() {
     li.append(m);
     ul.append(li);
   });
+  } // /local section
+}
+
+// ───────────────────────── 分组（Presets）─────────────────────────
+// 分组 = 一组 skill 选择器的命名集合（只引用库里的 skill，不复制）。与目标无关，
+// 可叠加启用 / 批量移除到「当前目录」。左栏分段在「来源 / 分组」间切换。
+
+function setAsideTab(tab) {
+  state.asideTab = tab;
+  $("#seg-sources").classList.toggle("active", tab === "sources");
+  $("#seg-presets").classList.toggle("active", tab === "presets");
+  $("#repo-list").classList.toggle("hidden", tab !== "sources");
+  $("#presets-view").classList.toggle("hidden", tab !== "presets");
+  if (tab === "presets") renderPresets();
+}
+
+async function refreshPresets() {
+  try { const d = await api("GET", "/api/presets"); state.presets = (d && d.presets) || []; }
+  catch { state.presets = []; }
+}
+
+function renderPresets() {
+  const box = $("#presets-view"); box.innerHTML = "";
+  const target = currentTarget();
+  // 两条创建途径：① 从当前目录快照；② 新建空分组再从库里挑 skill。
+  // 不放说明文字——按钮文案与 hover 已讲清。
+  const head = ce("div", { className: "preset-head" });
+  const createBtn = ce("button", { className: "small", textContent: "镜像当前项目", title: target ? ("镜像「" + targetLabel(target) + "」当前已启用的 skill 为一个分组") : "先在右上选一个目录标签页" });
+  createBtn.disabled = !target;
+  createBtn.onclick = () => createPresetFromCurrent(target);
+  const emptyBtn = ce("button", { className: "ghost small", textContent: "创建空组", title: "创建一个空分组，再点卡片从库（git 仓 / 本地源 / npx）里挑 skill" });
+  emptyBtn.onclick = () => newEmptyPreset();
+  head.append(createBtn, emptyBtn);
+  box.append(head);
+  if (!target) box.append(ce("div", { className: "muted", style: "font-size:12px;margin:2px 0 8px", textContent: "未选择目录：先在右上选一个同步目录标签页，才能从当前目录新建 / 启用分组（新建空分组不需要目录）。" }));
+
+  if (!state.presets.length) {
+    box.append(ce("div", { className: "empty", textContent: "还没有分组。两种建法：在某个目录启用好一组 skill 点「镜像当前项目」；或「创建空组」后点卡片从库里挑 skill。" }));
+    return;
+  }
+  const list = ce("div", { className: "preset-list" });
+  state.presets.forEach((p) => list.append(presetCard(p, target)));
+  box.append(list);
+}
+
+// syncChipsThumb positions the self-drawn scroll indicator for a preset's chip
+// area: hidden when not overflowing, else a thumb whose height/offset track the
+// scroll position. (WKWebView won't persistently render a CSS scrollbar.)
+function syncChipsThumb(chips, thumb) {
+  const sh = chips.scrollHeight, ch = chips.clientHeight;
+  if (sh <= ch + 1) { thumb.style.display = "none"; return; }
+  thumb.style.display = "block";
+  const th = Math.max(24, (ch * ch) / sh);
+  const denom = sh - ch;
+  const top = denom > 0 ? (chips.scrollTop / denom) * (ch - th) : 0;
+  thumb.style.height = th + "px";
+  thumb.style.top = top + "px";
+}
+
+// presetSkillLabel renders a preset member: a normal skill shows its clean name;
+// a whole-repo follow (<ns>/* — only legacy presets, new snapshots expand it)
+// shows "<source> · 整仓" instead of a bare "*".
+function presetSkillLabel(sel) {
+  if (sel === "*" || sel.endsWith("/*")) {
+    const ns = sel === "*" ? "" : sel.slice(0, -2);
+    return (ns ? sourceMeta(ns).label : "全部") + " · 整仓";
+  }
+  return cleanSkillName(sel);
+}
+
+function presetCard(p, target) {
+  const enabled = new Set((state.status.enabled || []).filter((e) => e.target === target).map((e) => e.skill));
+  const skills = p.skills || [];
+  const total = skills.length;
+  const have = skills.filter((s) => enabled.has(s.skill)).length;
+  // 整张卡片可点击打开跨源选择器（编辑这个分组）；chip 的 × 与底部动作按钮自行排除。
+  const card = ce("li", { className: "repo-card preset-card clickable", title: "点击编辑：从库里添加 / 移除 skill" });
+  card.onclick = (e) => { if (e.target.closest("button")) return; openPresetPicker(p); };
+  const top = ce("div", { className: "repo-top" });
+  top.append(ce("span", { className: "repo-name", textContent: p.name }));
+  top.append(ce("span", { className: "badge count", textContent: total + " 项" }));
+  card.append(top);
+  // skill 列表：每个 chip 带 × 可直接从分组移除。超过约四行高度时卡内滚动；
+  // WKWebView 不渲染 CSS 自定义滚动条（原生 overlay 会自动隐藏），故在右侧
+  // 自绘一个常驻滚动指示条，超长时固定可见。
+  const wrap = ce("div", { className: "preset-chips-wrap" });
+  const chips = ce("div", { className: "preset-chips" });
+  if (!total) chips.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "（空）点卡片从库里挑 skill" }));
+  skills.forEach((s) => {
+    const chip = ce("span", { className: "preset-chip", title: s.skill });
+    chip.append(ce("span", { className: "preset-chip-name", textContent: presetSkillLabel(s.skill) }));
+    const x = ce("button", { className: "preset-chip-x", textContent: "×", title: "从分组移除该 skill（不影响已启用的软链）" });
+    x.onclick = () => removeSkillFromPreset(p, s.skill);
+    chip.append(x);
+    chips.append(chip);
+  });
+  wrap.append(chips);
+  const thumb = ce("div", { className: "chips-thumb" });
+  wrap.append(thumb);
+  card.append(wrap);
+  chips.onscroll = () => syncChipsThumb(chips, thumb);
+  requestAnimationFrame(() => syncChipsThumb(chips, thumb)); // 入 DOM 后按真实尺寸定位
+  // 应用行。
+  const bar = ce("div", { className: "repo-meta" });
+  const apply = ce("button", { className: "small", textContent: "启用到当前目录", title: target ? ("把这组 skill 批量启用到「" + targetLabel(target) + "」（叠加，不影响其它已启用项）") : "先选一个目录" });
+  apply.disabled = !target || !total;
+  apply.onclick = () => applyPreset(p.name, target);
+  bar.append(apply);
+  const remove = ce("button", { className: "ghost small", textContent: "从当前移除", title: "把这组 skill 从当前目录批量停用（其它不动）" });
+  remove.disabled = !target || have === 0;
+  remove.onclick = () => removePreset(p.name, target);
+  bar.append(remove);
+  bar.append(ce("span", { className: "group-spacer" }));
+  const del = ce("button", { className: "danger small", textContent: "删除", title: "删除该分组（不影响已经启用的 skill）" });
+  del.onclick = () => deletePreset(p.name);
+  bar.append(del);
+  card.append(bar);
+  return card;
+}
+
+// presetCatalog enumerates every selectable skill across all sources, grouped by
+// source, with the EXACT selector each would enable as (ns + "/" + name) so the
+// picker's choices line up with apply/remove/dedup elsewhere.
+// appliedPresets returns the groups currently fully applied to a target — every
+// one of a group's selectors is enabled there (matches the edit-propagation /
+// delete "fully applied" rule). Used for the「已应用分组」tags atop the inventory.
+function appliedPresets(target) {
+  if (!target) return [];
+  const enabled = new Set((state.status.enabled || []).filter((e) => e.target === target).map((e) => e.skill));
+  return (state.presets || []).filter((p) => (p.skills || []).length > 0 && p.skills.every((s) => enabled.has(s.skill)));
+}
+
+function presetCatalog() {
+  const groups = [];
+  const mapItems = (ns, arr) => (arr || []).map((sk) => {
+    const nm = sk.linkName || sk.logicalName || sk.name;
+    return { sel: ns + "/" + nm, name: cleanSkillName(nm), desc: sk.description || "" };
+  });
+  (state.status.repos || []).forEach((repo) => {
+    const items = mapItems(repo.name, state.skillsByRepo[repo.name]);
+    if (items.length) groups.push({ ns: repo.name, label: repo.name + "（git 仓）", items });
+  });
+  const loc = mapItems(LOCAL_NS, state.skillsByRepo[LOCAL_NS]);
+  if (loc.length) groups.push({ ns: LOCAL_NS, label: "local（本地源）", items: loc });
+  (state.dirSources || []).forEach((d) => {
+    const items = mapItems(dirNS(d.id), state.skillsByRepo[dirNS(d.id)]);
+    if (items.length) groups.push({ ns: dirNS(d.id), label: d.label + "（本地源）", items });
+  });
+  const npx = mapItems(AGENTS_NS, state.skillsShSkills);
+  if (npx.length) groups.push({ ns: AGENTS_NS, label: "npx skills", items: npx });
+  return groups;
+}
+
+// openPresetPicker opens the cross-source skill picker for a preset. Each source
+// group has a「全部启用（整仓）」toggle = whole-repo follow (<ns>/*): when on, ALL of
+// that source's individual skills are checked AND locked (can't single-uncheck);
+// when off, you pick individual skills (snapshot). On save: 整仓 group → <ns>/*
+// (follow); else each checked skill → <ns>/<name> (snapshot). Members whose source
+// is no longer in the library (stale refs / orphan wildcards) are preserved as-is.
+function openPresetPicker(preset) {
+  const groups = presetCatalog();
+  const known = new Set();          // every catalog selector
+  const catalogNs = new Set();      // every source ns present in the catalog
+  groups.forEach((g) => { catalogNs.add(g.ns); g.items.forEach((it) => known.add(it.sel)); });
+  // Initial membership from the preset.
+  const memberSel = new Set();      // individual members
+  const wholeNs = new Set();        // ns that are whole-repo follow (<ns>/*)
+  (preset.skills || []).forEach((s) => {
+    if (s.skill === "*") return;    // bare "*" is legacy noise — ignore
+    if (s.skill.endsWith("/*")) wholeNs.add(s.skill.slice(0, -2));
+    else memberSel.add(s.skill);
+  });
+
+  const overlay = ce("div", { className: "modal" });
+  const card = ce("div", { className: "modal-card" });
+  card.style.width = "min(560px,100%)";
+  const head = ce("div", { className: "modal-head" });
+  head.append(ce("h3", { textContent: "添加 skill 到「" + preset.name + "」" }));
+  const x = ce("button", { className: "modal-x", textContent: "×", title: "关闭" });
+  head.append(x);
+  card.append(head);
+  const body = ce("div", { className: "modal-body picker-body", style: "padding:12px 18px;max-height:62vh;overflow:auto" });
+  const filter = ce("input", { type: "search", placeholder: "过滤 skill…" });
+  filter.style.width = "100%";
+  // 过滤框放进 head 与滚动 body 之间的独立固定条，随列表滚动时钉在顶部。
+  const filterBar = ce("div", { className: "picker-filter", style: "padding:12px 18px;border-bottom:1px solid var(--line)" });
+  filterBar.append(filter);
+  card.append(filterBar);
+  const checks = [];     // {input, row, group, hay} — for filtering
+  const groupCtl = [];   // {ns, allCb, itemCbs:[{sel,input}]} — for save
+  if (!groups.length) {
+    body.append(ce("div", { className: "empty", textContent: "库里还没有可选的 skill。先在「来源」里添加 git 仓 / 本地源，或装 npx skills。" }));
+  }
+  groups.forEach((g) => {
+    const isWhole = wholeNs.has(g.ns);
+    // 分区标题行：左标签 + 右「全部启用（整仓同步）」开关。
+    const gh = ce("div", { className: "picker-group" });
+    gh.append(ce("span", { className: "picker-group-label", textContent: g.label }));
+    gh.append(ce("span", { className: "group-spacer" }));
+    const allLabel = ce("label", { className: "picker-all", title: "整仓同步：启用该源现有及将来新增的全部 skill；开启后不能单独取消某个 skill" });
+    const allCb = ce("input", { type: "checkbox" });
+    allCb.checked = isWhole;
+    allLabel.append(allCb, ce("span", { textContent: "全部启用（整仓）" }));
+    gh.append(allLabel);
+    body.append(gh);
+    const itemCbs = [];
+    g.items.forEach((it) => {
+      const row = ce("label", { className: "picker-row", title: it.sel });
+      const cb = ce("input", { type: "checkbox" });
+      cb.checked = isWhole || memberSel.has(it.sel);
+      cb.disabled = isWhole; // 整仓时锁定，不允许单个取消
+      row.append(cb, ce("span", { className: "picker-name", textContent: it.name }));
+      if (it.desc) row.append(ce("span", { className: "picker-desc muted", textContent: it.desc }));
+      body.append(row);
+      itemCbs.push({ sel: it.sel, input: cb });
+      checks.push({ input: cb, row, group: gh, hay: (it.name + " " + it.sel + " " + it.desc).toLowerCase() });
+    });
+    allCb.onchange = () => {
+      const on = allCb.checked;
+      itemCbs.forEach((c) => { if (on) c.input.checked = true; c.input.disabled = on; });
+    };
+    groupCtl.push({ ns: g.ns, allCb, itemCbs });
+  });
+  filter.oninput = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shownByGroup = new Map();
+    checks.forEach((c) => {
+      const show = !q || c.hay.includes(q);
+      c.row.classList.toggle("hidden", !show);
+      if (show) shownByGroup.set(c.group, true);
+    });
+    const seen = new Set(); // 隐藏没有任何可见项的分组标题
+    checks.forEach((c) => { if (!seen.has(c.group)) { seen.add(c.group); c.group.classList.toggle("hidden", !shownByGroup.get(c.group)); } });
+  };
+  card.append(body);
+  const actions = ce("div", { style: "display:flex;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line)" });
+  const cancel = ce("button", { className: "ghost small", textContent: "取消" });
+  const save = ce("button", { className: "small", textContent: "保存" });
+  actions.append(cancel, save);
+  card.append(actions);
+  overlay.append(card);
+  document.body.append(overlay);
+  const close = () => overlay.remove();
+  x.onclick = cancel.onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  save.onclick = async () => {
+    // 保留 source 已不在库里的旧引用：独立 selector 不在 known 的、以及孤儿整仓通配。
+    const kept = (preset.skills || []).filter((s) => {
+      if (s.skill === "*") return false;
+      if (s.skill.endsWith("/*")) return !catalogNs.has(s.skill.slice(0, -2));
+      return !known.has(s.skill);
+    });
+    const built = [];
+    groupCtl.forEach((gc) => {
+      if (gc.allCb.checked) built.push({ skill: gc.ns + "/*", mode: "follow" }); // 整仓
+      else gc.itemCbs.forEach((c) => { if (c.input.checked) built.push({ skill: c.sel, mode: "snapshot" }); });
+    });
+    const skills = kept.concat(built);
+    save.disabled = true;
+    try { await api("PUT", "/api/presets", { name: preset.name, skills }); }
+    catch (e) { banner("保存失败：" + e.message, true); save.disabled = false; return; }
+    try { await api("POST", "/api/apply"); } catch { /* 同步到已应用目录后对账，尽力而为 */ }
+    close();
+    toast("已更新分组「" + preset.name + "」（" + skills.length + " 项）");
+    await load(); renderPresets();
+  };
+  setTimeout(() => filter.focus(), 0);
+}
+
+async function newEmptyPreset() {
+  const name = await promptModal("创建空组", "起个名字，建好后点卡片从库里挑 skill（同名会覆盖）", "");
+  if (!name) return;
+  try { await api("PUT", "/api/presets", { name, skills: [] }); }
+  catch (e) { banner("新建失败：" + e.message, true); return; }
+  await refreshPresets(); renderPresets();
+  const p = state.presets.find((x) => x.name === name); // 建好直接开选择器，省一步
+  if (p) openPresetPicker(p);
+}
+
+async function removeSkillFromPreset(preset, sel) {
+  const skills = (preset.skills || []).filter((s) => s.skill !== sel);
+  try { await api("PUT", "/api/presets", { name: preset.name, skills }); }
+  catch (e) { banner("移除失败：" + e.message, true); return; }
+  try { await api("POST", "/api/apply"); } catch { /* 同步到已应用目录后对账，尽力而为 */ }
+  await load(); renderPresets();
+}
+
+async function createPresetFromCurrent(target) {
+  if (!target) return;
+  const name = await promptModal("从当前目录新建分组", "给这组 skill 起个名字（同名会覆盖）", "");
+  if (!name) return;
+  try {
+    const r = await api("POST", "/api/presets", { name, target });
+    toast("已存为分组「" + name + "」（" + r.count + " skill）");
+  } catch (e) { banner("新建分组失败：" + e.message, true); return; }
+  await refreshPresets(); renderPresets();
+}
+
+async function applyPreset(name, target) {
+  if (!target) return;
+  try {
+    const r = await api("POST", "/api/presets/apply", { name, target });
+    await api("POST", "/api/apply"); // 落盘后整理软链（与单个启用一致）
+    toast("已启用分组「" + name + "」（新增 " + r.added + "/" + r.total + "）");
+  } catch (e) { banner("启用分组失败：" + e.message, true); return; }
+  await load(); renderPresets();
+}
+
+async function removePreset(name, target) {
+  if (!target) return;
+  if (!(await confirmModal("把分组「" + name + "」的 skill 从当前目录移除？只停用这组，其它不动。"))) return;
+  try {
+    const r = await api("POST", "/api/presets/remove", { name, target });
+    await api("POST", "/api/apply");
+    toast("已移除分组「" + name + "」（停用 " + r.removed + "）");
+  } catch (e) { banner("移除失败：" + e.message, true); return; }
+  await load(); renderPresets();
+}
+
+async function deletePreset(name) {
+  if (!(await confirmModal("删除分组「" + name + "」？会同时拆除这组 skill 在所有目录建立的软链；与其它分组共用的 skill 会保留。", "删除", true))) return;
+  let r;
+  try { r = await api("DELETE", "/api/presets?name=" + encodeURIComponent(name)); }
+  catch (e) { banner("删除失败：" + e.message, true); return; }
+  try { await api("POST", "/api/apply"); } catch { /* 拆链对账尽力而为 */ }
+  toast("已删除分组「" + name + "」" + (r && r.removed ? "（拆除 " + r.removed + " 处软链）" : ""));
+  await load(); renderPresets();
+}
+
+// promptModal: 轻量文本输入弹窗，返回 Promise<string|null>（取消 / 空 → null）。
+// 自建 DOM 并复用现有 .modal/.modal-card 样式，无需在 index.html 预置标记。
+function promptModal(title, label, def) {
+  return new Promise((resolve) => {
+    const overlay = ce("div", { className: "modal" });
+    const card = ce("div", { className: "modal-card" });
+    card.style.width = "min(420px,100%)";
+    const head = ce("div", { className: "modal-head" });
+    head.append(ce("h3", { textContent: title }));
+    const x = ce("button", { className: "modal-x", textContent: "×", title: "关闭" });
+    head.append(x);
+    card.append(head);
+    const body = ce("div", { className: "modal-body", style: "padding:16px 18px" });
+    if (label) body.append(ce("label", { className: "tm-label", textContent: label }));
+    const input = ce("input", { value: def || "" });
+    input.style.width = "100%";
+    body.append(input);
+    const actions = ce("div", { style: "display:flex;gap:8px;justify-content:flex-end;margin-top:14px" });
+    const cancel = ce("button", { className: "ghost small", textContent: "取消" });
+    const ok = ce("button", { className: "small", textContent: "确定" });
+    actions.append(cancel, ok);
+    body.append(actions);
+    card.append(body);
+    overlay.append(card);
+    document.body.append(overlay);
+    const done = (v) => { overlay.remove(); resolve(v); };
+    x.onclick = cancel.onclick = () => done(null);
+    overlay.onclick = (e) => { if (e.target === overlay) done(null); };
+    ok.onclick = () => done(input.value.trim() || null);
+    input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); ok.onclick(); } else if (e.key === "Escape") done(null); };
+    setTimeout(() => input.focus(), 0);
+  });
 }
 
 // cleanSkillName returns a friendly display label for a skill whose identifier
@@ -604,6 +998,9 @@ async function openSkillsShModal() {
   $("#repo-skills-title").textContent = "npx skills";
   const body = $("#repo-skills-body");
   const render = (skills) => {
+    // 重渲染前记住列表滚动位置，渲染完还原——避免启用/停用/更新后列表跳回顶部。
+    const prevList = body.querySelector(".rs-list");
+    const prevScroll = prevList ? prevList.scrollTop : 0;
     body.innerHTML = "";
     const target = currentTarget();
     const follow = enabledFollow(AGENTS_NS);
@@ -614,8 +1011,8 @@ async function openSkillsShModal() {
       const fb = ce("button", {
         className: (follow ? "" : "ghost") + " small",
         style: "white-space:nowrap",
-        textContent: follow ? "取消同步" : "自动同步 skill",
-        title: follow ? "关闭自动同步：不再自动纳入 skills.sh 的 skill（已建立的软链保留）" : "自动同步 skill：skills.sh 现有及将来的全部 skill 自动启用进当前目录",
+        textContent: follow ? "取消启用" : "全部启用",
+        title: follow ? "关闭自动同步：不再自动纳入 skills.sh 的 skill（已建立的软链保留）" : "全部启用：skills.sh 现有及将来的全部 skill 自动启用进当前目录",
       });
       fb.onclick = async () => {
         fb.disabled = true;
@@ -674,6 +1071,7 @@ async function openSkillsShModal() {
       main.append(cmd);
       card.append(main); list.append(card);
     });
+    list.scrollTop = prevScroll; // 还原到重渲染前的滚动位置
   };
   render(null);
   $("#repo-skills-modal").classList.remove("hidden");
@@ -742,7 +1140,7 @@ function openRepoSkills(repoName, opts) {
     // git 仓专属：「同步仓库」（更新+上传合并）。无本地改动直接更新；有改动则弹窗
     // 勾选上传内容（确认=更新并上传 / 仅更新）。软链 skill 的仓级操作只在这里做。
     if (opts.git) {
-      const ub = ce("button", { className: "small", textContent: "同步仓库", title: "与上游同步该仓：无本地改动直接拉取更新；有改动（移动/删除/修改/新增）则弹窗让你选择要上传的内容（确认=更新并上传 / 仅更新）" });
+      const ub = ce("button", { className: "small", style: "white-space:nowrap", textContent: "同步仓库", title: "与上游同步该仓：无本地改动直接拉取更新；有改动（移动/删除/修改/新增）则弹窗让你选择要上传的内容（确认=更新并上传 / 仅更新）" });
       ub.onclick = () => repoUpdateFlow(state.status.repos.find((rp) => rp.name === repoName) || { name: repoName }, ub);
       bar.append(ub);
     }
@@ -750,8 +1148,8 @@ function openRepoSkills(repoName, opts) {
       const fb = ce("button", {
         className: (follow ? "" : "ghost") + " small",
         style: "white-space:nowrap",
-        textContent: follow ? "取消同步" : "自动同步 skill",
-        title: follow ? "关闭自动同步：不再自动纳入该源的 skill（已建立的软链保留）" : "自动同步 skill：该源现有及将来新增的全部 skill 自动启用进当前目录（与「同步仓库」无关——那是拉取上游）",
+        textContent: follow ? "取消启用" : "全部启用",
+        title: follow ? "关闭自动同步：不再自动纳入该源的 skill（已建立的软链保留）" : "全部启用：该源现有及将来新增的全部 skill 自动启用进当前目录（与「同步仓库」无关——那是拉取上游）",
       });
       fb.onclick = async () => {
         fb.disabled = true;
@@ -911,7 +1309,12 @@ async function doRepoUpdate(repo, force, btn) {
     const failed = resp && (resp.state === "failed" || (resp.error && !resp.dirty)) ? (resp.error || "未知错误") : "";
     const errMsg = [failed, summaryErrs].filter(Boolean).join("；");
     if (errMsg) banner("同步 " + repo.name + " 失败：" + errMsg, true, true);
-    else toast("已同步 " + repo.name);
+    else {
+      // 展示本次从上游拉取的 skill 变更（与「全量更新」同款面板）；无变更则轻提示。
+      const ups = (resp && resp.updates) || [];
+      if (ups.length) await showUpdatePanel(ups);
+      else toast("已同步 " + repo.name + "：无更新内容");
+    }
     await load();
   } catch (e) {
     banner("同步 " + repo.name + " 失败：" + e.message, true, true);
@@ -1005,7 +1408,7 @@ function refreshUploadMsg() {
   const entries = (state.uploadCtx && state.uploadCtx.entries) || [];
   const desc = (state.uploadCtx && state.uploadCtx.desc) || {};
   if (!entries.length) { ta.value = ""; return; }
-  const head = "更新 " + entries.length + " 个 skill";
+  const head = "MIC-0 更新 " + entries.length + " 个 skill";
   const body = entries.map((e) => "- " + cleanSkillName(e.skill) + (desc[e.skill] ? "：" + desc[e.skill] : "")).join("\n");
   ta.value = head + "\n\n" + body;
 }
@@ -1262,15 +1665,53 @@ async function addLocalSource(dir, label) {
 
 async function fetchInventory() {
   const t = currentTarget();
-  if (!t) { state.inventory = []; state.invLoading = false; state.invError = ""; renderInventory(); return; }
+  if (!t) { state.inventory = []; state.inherited = []; state.invLoading = false; state.invError = ""; renderInventory(); return; }
   state.invLoading = true; state.invError = ""; renderInventory();
   try {
     const r = await api("GET", "/api/inventory?target=" + encodeURIComponent(t));
     state.inventory = r.items || [];
     state.invScope = r.scope || "";
-  } catch (e) { state.inventory = []; state.invError = e.message; }
+    // 项目级目标：额外拉「上级继承」的 skill（运行时上级目录也会读到），只读展示以防重复启用。
+    state.inherited = [];
+    if (state.invScope === "project") {
+      try { state.inherited = ((await api("GET", "/api/inherited?target=" + encodeURIComponent(t))).inherited) || []; }
+      catch { /* 继承信息拿不到不影响主视图 */ }
+    }
+  } catch (e) { state.inventory = []; state.inherited = []; state.invError = e.message; }
   state.invLoading = false;
   renderInventory();
+}
+
+// renderInheritedSection: 项目级目标顶部的只读区块，列出运行时上级目录（父级 /
+// 用户级）已提供的 skill，提醒用户不必在本级重复启用。禁止任何操作（纯展示）。
+function renderInheritedSection(root) {
+  const inh = state.inherited || [];
+  if (!inh.length) return;
+  const open = state.collapsed.has("inherited-open"); // 默认收起：present=已展开
+  const box = ce("div", { style: "border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:12px" });
+  const head = ce("div", { className: "row", style: "gap:10px;align-items:baseline;cursor:pointer" });
+  head.append(ce("span", { className: "sec-caret", textContent: open ? "▾" : "▸" }));
+  head.append(ce("span", { style: "font-weight:600;color:var(--text)", textContent: "继承自上级（" + inh.length + "）" }));
+  head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "上级目录运行时已提供，本级无需重复启用（只读）" }));
+  head.onclick = () => {
+    if (state.collapsed.has("inherited-open")) state.collapsed.delete("inherited-open");
+    else state.collapsed.add("inherited-open");
+    saveCollapsed();
+    renderInventory();
+  };
+  box.append(head);
+  if (open) {
+    // 横向 flex-wrap 紧凑排列，充分利用宽度。
+    const list = ce("div", { style: "display:flex;flex-wrap:wrap;gap:6px 8px;margin-top:8px" });
+    inh.forEach((i) => {
+      const chip = ce("span", { style: "display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:12px", title: "来自 " + i.from });
+      chip.append(ce("span", { style: "color:var(--text)", textContent: cleanSkillName(i.name) }));
+      chip.append(ce("span", { className: "muted", style: "font-size:10px", textContent: i.scope === "user" ? "用户级" : "上级项目" }));
+      list.append(chip);
+    });
+    box.append(list);
+  }
+  root.append(box);
 }
 
 // abbrevLabel shortens a long source label to its hyphen-segment initials
@@ -1601,6 +2042,8 @@ function renderInventory() {
     root.append(e);
     return;
   }
+  // 项目级：先渲染只读的「继承自上级」区块（即使本目录暂无 skill 也显示，方便看父级有什么）。
+  renderInheritedSection(root);
   let items = state.inventory.slice();
   // 注入当前 tab 所属 harness 的插件 skill（只读），作为「目录现状」底部「插件」组。
   const curHarness = (state.targets.find((t) => t.dir === currentTarget()) || {}).harness;
@@ -1614,6 +2057,18 @@ function renderInventory() {
     box.append(ce("div", { className: "muted", style: "margin-top:6px", textContent: "用上方搜索框跨所有源查找并启用，或在目录里创建 SKILL.md 后刷新。" }));
     root.append(box);
     return;
+  }
+  // 顶部：当前目录「已应用的分组」标签（该组 skill 全部已启用在本目录即算应用）。
+  const applied = appliedPresets(currentTarget());
+  if (applied.length) {
+    const bar = ce("div", { className: "applied-presets" });
+    bar.append(ce("span", { className: "ap-label", textContent: "已应用分组：" }));
+    applied.forEach((p) => {
+      const tag = ce("span", { className: "ap-tag", title: "点击查看 / 编辑该分组", textContent: p.name });
+      tag.onclick = () => { setAsideTab("presets"); openPresetPicker(p); };
+      bar.append(tag);
+    });
+    root.append(bar);
   }
   // Group by source (R3.2 / 用户要求「按仓库分类」): 本地 → 各 git 仓 → skills.sh →
   // 插件 → 未备份 → 未知软链.
@@ -1785,8 +2240,8 @@ function inventoryCard(i) {
   //   · 杂散/未知软链            → 「删除」（只删链，不动目标）；
   //   · 手写未备份 / 插件 等     → 「操作」（详情里做 备份/删除 或只读说明）。
   if (i.follow && i.managed && i.selector) {
-    const off = ce("button", { className: "danger small", textContent: "停用", style: "opacity:.4;cursor:not-allowed", title: "整仓自动同步中，不能单独停用——请到左侧该源弹窗关闭「自动同步 skill」" });
-    off.onclick = () => toast("「" + sourceMeta(i.selector.split("/")[0]).label + "」整仓自动同步中，不能单独停用该 skill。请到左侧该源弹窗关闭「自动同步 skill」（会移除该源在本目录的全部 skill）。", "info");
+    const off = ce("button", { className: "danger small", textContent: "停用", style: "opacity:.4;cursor:not-allowed", title: "整仓自动同步中，不能单独停用——请到左侧该源弹窗点「取消启用」" });
+    off.onclick = () => toast("「" + sourceMeta(i.selector.split("/")[0]).label + "」整仓自动同步中，不能单独停用该 skill。请到左侧该源弹窗点「取消启用」（会移除该源在本目录的全部 skill）。", "info");
     r1.append(off);
   } else if (i.managed && i.selector) {
     const off = ce("button", { className: "danger small", textContent: "停用", title: "拆除当前目录下的软链（不影响本体与其它目录）" });
@@ -1917,7 +2372,7 @@ async function updateSkillSh(name, btn) {
 //   {name, desc, sourceKind: "handwritten"|"local"|"git", root?, fromRepo?}
 // A unified 目标位置 dropdown lists `local` (the managed store) + every git repo;
 // 确定 moves the skill there. `local` only backs up (no push); a git target
-// commits + pushes (…). It routes to the right endpoint by source+target.
+// commits + pushes (MIC-0 …). It routes to the right endpoint by source+target.
 function openMoveModal(ctx) {
   const m = $("#contribute-modal");
   const repos = state.status.repos || [];
@@ -2043,6 +2498,27 @@ async function confirmShadowEnable(linkName, target) {
   );
 }
 
+// healthUnitCount counts the resolvable units the health modal shows: shadow
+// conflicts sharing a target-pair collapse into ONE card; other conflicts and each
+// sync error count individually. Keeps the footer badge in step with the modal so
+//「健康度 N 项待处理」N equals the number of cards/items actually rendered.
+function healthUnitCount(s) {
+  const conflicts = (s && s.conflicts) || [];
+  const errors = (s && s.errors) || [];
+  const pairs = new Set();
+  let units = 0;
+  conflicts.forEach((c) => {
+    const ts = [...new Set(c.targets || [])];
+    if (c.kind === "shadow" && ts.length === 2) {
+      const key = ts.slice().sort().join(" ");
+      if (pairs.has(key)) return; // same 父⇄子 pair → already counted as one card
+      pairs.add(key);
+    }
+    units++;
+  });
+  return units + errors.length;
+}
+
 function renderSummary() {
   const f = $("#summary"); f.innerHTML = "";
   const s = state.status.lastSummary;
@@ -2053,8 +2529,9 @@ function renderSummary() {
   if (s.pruned && s.pruned.length) parts.push("清理悬空 " + s.pruned.length);
   f.append(ce("span", { textContent: parts.length ? "上次同步：" + parts.join("，") : "上次同步：无变化" }));
   // 不再在页脚堆砌每条冲突/错误（无价值的一墙告警）。只在有问题时显示一个可点击的
-  // 「健康度」入口，详情与解决都在弹窗里完成。
-  const issues = ((s.conflicts || []).length) + ((s.errors || []).length);
+  // 「健康度」入口，详情与解决都在弹窗里完成。计数与弹窗呈现的「可处理单元」一致：
+  // 同一对目录的遮蔽合并成一项，其余冲突与每条同步错误各算一项。
+  const issues = healthUnitCount(s);
   if (issues) {
     const h = ce("span", { className: "health-warn", textContent: "⚠ 健康度 " + issues + " 项待处理", title: "撞名 / 遮蔽 / 嵌套 / 同步错误——点击查看并解决" });
     h.onclick = openHealthModal;
@@ -2078,9 +2555,14 @@ function humanizeSyncError(raw) {
       };
     }
     if (/real path|diverged/.test(inner)) {
+      // m[1] is the full link path "<target>/<name>"; split on the last separator
+      // (handle both / and \) so the relink action gets the target dir + name.
+      const full = m[1];
+      const idx = Math.max(full.lastIndexOf("/"), full.lastIndexOf("\\"));
       return {
         why: `跳过链接「${name}」：原本的软链位置已变成真实文件/目录（可能被其它工具替换）。`,
-        fix: `确认该内容是否还需要；如需重新链接，请先移除它再同步。`,
+        fix: `库里已有该 skill 的归档，可一键移除本地这份并重建软链（不会丢内容）。`,
+        relink: idx > 0 ? { target: full.slice(0, idx), name: full.slice(idx + 1) } : null,
       };
     }
     return { why: `链接「${name}」失败。`, fix: `查看本行提示（悬停可见原始信息）后重试。` };
@@ -2167,7 +2649,7 @@ function setInventoryActions(i) {
   // 给出明确文案，而不是让详情底部空着，否则用户找不到「为什么没有停用」。
   if (i.managed && i.follow && i.selector) {
     const src = sourceMeta(i.selector.split("/")[0]).label;
-    el.append(ce("span", { className: "ma-note", textContent: "「" + src + "」整仓自动同步中，不能单独停用该 skill。如需停用，请到左侧该源弹窗关闭「自动同步 skill」（会移除该源在本目录的全部 skill）。" }));
+    el.append(ce("span", { className: "ma-note", textContent: "「" + src + "」整仓自动同步中，不能单独停用该 skill。如需停用，请到左侧该源弹窗点「取消启用」（会移除该源在本目录的全部 skill）。" }));
   }
   appendExportAction(el);
   el.classList.toggle("hidden", el.children.length === 0);
@@ -2401,6 +2883,18 @@ async function openDetailAt(name) {
 
 // updateNow is the GIT update-all action (git 仓 group's「全量更新」). npx/skills.sh
 // has its own update (updateSkillsShAll) — one git path, one npx path.
+// showUpdatePanel 弹出「本次更新内容」面板：逐仓列出本次从上游拉取的 skill 变更
+// （＋新增/～更新/－移除）。全量「更新全部」与单仓「同步仓库」共用，明细一致。
+async function showUpdatePanel(ups) {
+  const sym = { added: "＋ 新增", updated: "～ 更新", removed: "－ 移除" };
+  const total = ups.reduce((n, u) => n + ((u.changes || []).length), 0);
+  const blocks = ups.map((u) => {
+    const items = (u.changes || []).map((c) => "    " + (sym[c.kind] || c.kind) + "  " + c.name).join("\n");
+    return "【" + u.repo + "】\n" + items;
+  });
+  await confirmModal("本次更新内容（" + total + " 个 skill 变更）：\n\n" + blocks.join("\n\n"), "知道了", false);
+}
+
 async function updateNow(force) {
   toast("同步中…", "info");
   let sum = null;
@@ -2418,9 +2912,15 @@ async function updateNow(force) {
       return;
     }
   }
-  const changed = sum && ((sum.created || []).length + (sum.removed || []).length + (sum.pruned || []).length);
-  if (changed) toast("更新完成：新增 " + (sum.created || []).length + " · 移除 " + (sum.removed || []).length + (sum.pruned && sum.pruned.length ? " · 清理 " + sum.pruned.length : ""));
-  else toast("git 源已是最新，无变化");
+  // 展示本次从上游拉取的 skill 变更（新增/更新/移除），逐仓列出。
+  const ups = (sum && sum.updates) || [];
+  if (ups.length) {
+    await showUpdatePanel(ups);
+  } else {
+    const changed = sum && ((sum.created || []).length + (sum.removed || []).length + (sum.pruned || []).length);
+    if (changed) toast("更新完成：链接 新增 " + (sum.created || []).length + " · 移除 " + (sum.removed || []).length + (sum.pruned && sum.pruned.length ? " · 清理 " + sum.pruned.length : ""));
+    else toast("git 源已是最新，无变化");
+  }
 }
 
 // events
@@ -2679,6 +3179,41 @@ function renderHealthBody(list) {
     });
     body.append(sec);
   });
+
+  // 同步错误（reconcile 失败）：弹窗标题里承诺了「同步错误」，这里逐条列出（人话 +
+  // 原文 hover）。它们不是按钮可解的——下次成功同步会自动消失——但要让用户看见，
+  // 否则页脚计数把它们算进去、弹窗却不显示，就会「N 项待处理」对不上。
+  errors.forEach((raw) => {
+    const rawStr = typeof raw === "string" ? raw : JSON.stringify(raw); // 防御：Errors 应为字符串
+    const h = humanizeSyncError(rawStr); // 返回 {why, fix}
+    const sec = ce("div", { className: "cf-item" });
+    const head = ce("div", { className: "cf-head" });
+    head.append(ce("span", { className: "cf-name", textContent: "同步错误" }));
+    head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "下次成功同步后自动消失" }));
+    sec.append(head);
+    sec.append(ce("div", { className: "muted", style: "font-size:12px;margin-top:6px;white-space:pre-wrap", textContent: h.why || rawStr, title: rawStr }));
+    if (h.fix) sec.append(ce("div", { className: "muted", style: "font-size:12px;margin-top:3px", textContent: "建议：" + h.fix }));
+    // 「真身占位」类可一键解决：库里已有归档，删本地这份再重建软链，不丢内容。
+    if (h.relink) {
+      const btn = ce("button", { className: "small", style: "margin-top:8px", textContent: "移除并重新链接",
+        title: "删除目标位置的真实文件/目录，重建指向库中归档的软链。库里已有归档，删除本地不会丢内容。" });
+      btn.onclick = async () => {
+        if (!(await confirmModal(
+          "将删除目标位置的真实文件/目录：\n" + h.relink.target + "/" + h.relink.name +
+          "\n\n库里已有该 skill 的归档，删除本地不会丢内容，之后会重建软链指向归档。继续？",
+          "移除并重新链接", true))) return;
+        btn.disabled = true;
+        try { await api("POST", "/api/relink-archived", h.relink); }
+        catch (e) { banner("重新链接失败：" + e.message, true); btn.disabled = false; return; }
+        toast("已移除本地并重新链接 " + h.relink.name);
+        await load();
+        try { renderHealthBody(await api("GET", "/api/conflicts")); }
+        catch { closeHealthModal(); }
+      };
+      sec.append(btn);
+    }
+    body.append(sec);
+  });
 }
 async function resolveConflict(c, keep) {
   const drop = c.candidates.length > 1
@@ -2849,9 +3384,57 @@ async function addRepoAndSync(url, branch) {
     }
   } catch (err) { banner("添加失败：" + err.message, true); }
 }
-async function addTarget(dir, alias) {
+// chooseHarnessModal: 添加的文件夹既不是 Claude Code 也不是 Codex 的 skill 目录时，
+// 让用户选在它下面创建哪种。返回 ["cc"] / ["codex"] / ["cc","codex"] 或 null(取消)。
+function chooseHarnessModal(dir) {
+  return new Promise((resolve) => {
+    const m = ce("div", { className: "modal" });
+    const card = ce("div", { className: "modal-card", style: "width:min(480px,100%)" });
+    card.append(ce("div", { className: "modal-head", innerHTML: "<h3>创建 skill 目录</h3>" }));
+    const body = ce("div", { className: "help-body" });
+    body.append(ce("p", { style: "white-space:pre-wrap;color:var(--text)", textContent: "「" + dir + "」\n不是 Claude Code 或 Codex 的 skill 目录。要在它下面创建哪种？" }));
+    body.append(ce("p", { className: "muted", style: "font-size:12px", textContent: "Claude Code → .claude/skills；Codex → .agents/skills（项目级 Codex 读取处）。" }));
+    // 横向多选：Claude Code / Codex（默认都勾）。
+    const opts = ce("div", { className: "row", style: "gap:24px;margin-top:8px" });
+    const mk = (label) => {
+      const cb = ce("input", { type: "checkbox", checked: true });
+      const l = ce("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)" });
+      l.append(cb, ce("span", { textContent: label }));
+      return { l, cb };
+    };
+    const cc = mk("Claude Code"), cx = mk("Codex");
+    opts.append(cc.l, cx.l);
+    body.append(opts);
+    card.append(body);
+    const row = ce("div", { className: "row", style: "justify-content:flex-end;gap:8px;padding:0 18px 18px" });
+    const done = (v) => { m.remove(); resolve(v); };
+    const cancel = ce("button", { className: "ghost", textContent: "取消" });
+    cancel.onclick = () => done(null);
+    const ok = ce("button", { textContent: "确认" });
+    ok.onclick = () => {
+      const kinds = [];
+      if (cc.cb.checked) kinds.push("cc");
+      if (cx.cb.checked) kinds.push("codex");
+      if (!kinds.length) { toast("请至少选择一项", "info"); return; }
+      done(kinds);
+    };
+    row.append(cancel, ok);
+    card.append(row);
+    m.append(card);
+    m.onclick = (e) => { if (e.target === m) done(null); };
+    document.body.append(m);
+  });
+}
+
+async function addTarget(dir, alias, create) {
   try {
-    const res = await api("POST", "/api/targets", { dir, alias });
+    const res = await api("POST", "/api/targets", { dir, alias, create });
+    if (res && res.needsChoice) {
+      const chosen = await chooseHarnessModal(res.dir || dir);
+      if (!chosen) return; // 用户取消，不创建、不添加
+      await addTarget(dir, alias, chosen);
+      return;
+    }
     if (res && res.added && res.added.length) state.activeTarget = res.added[0];
     await load();
   } catch (err) { banner("添加同步目录失败：" + err.message, true); }
@@ -3025,6 +3608,11 @@ $("#modal").onclick = (e) => { if (e.target.id === "modal") $("#modal").classLis
   } catch { /* localStorage 不可用时静默跳过 */ }
 })();
 
+// 左栏分段（来源 / 分组）+ 来源分区折叠状态恢复。
+loadCollapsed();
+$("#seg-sources").onclick = () => setAsideTab("sources");
+$("#seg-presets").onclick = () => setAsideTab("presets");
+
 // On page entry: reconcile-then-render so the footer is current, then auto-check
 // updates once (ls-remote only, no pull). While the app stays open, re-check
 // every hour so the「有更新」badges stay current without a manual button.
@@ -3050,7 +3638,7 @@ async function checkAppUpdate() {
       } else {
         // web build / unsupported → just notify (manual download)
         if (btn) btn.classList.add("hidden");
-        banner("SkillManager 有新版本 v" + d.latest + "（当前 v" + d.current + "）" + (d.notes ? "：" + d.notes : "") + "　·　请到 GitHub Releases 下载更新", false, true);
+        banner("SkillManager 有新版本 v" + d.latest + "（当前 v" + d.current + "）" + (d.notes ? "：" + d.notes : "") + "　·　请到公司 GitLab 下载更新", false, true);
       }
     } else if (btn) {
       btn.classList.add("hidden");

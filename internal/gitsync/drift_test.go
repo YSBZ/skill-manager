@@ -55,7 +55,7 @@ func TestSyncYieldsOnCommittedUnpushed(t *testing.T) {
 	// state porcelain alone cannot see.
 	writeSkill(t, mirror, "skill-committed")
 	runGit(t, mirror, "add", "-A")
-	runGit(t, mirror, "commit", "-q", "-m", "skill-committed x")
+	runGit(t, mirror, "commit", "-q", "-m", "MIC-0 skill-committed x")
 
 	r := s.sync(ctx, mirror, bare, Options{Branch: "main"})
 	if r.Action != ActionDirtySkip || !r.Dirty {
@@ -92,7 +92,7 @@ func TestSyncMixedDrift(t *testing.T) {
 	// One skill committed-unpushed, README modified in the working tree.
 	writeSkill(t, mirror, "skill-c2")
 	runGit(t, mirror, "add", "-A")
-	runGit(t, mirror, "commit", "-q", "-m", "skill-c2 x")
+	runGit(t, mirror, "commit", "-q", "-m", "MIC-0 skill-c2 x")
 	if err := os.WriteFile(filepath.Join(mirror, "README.md"), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

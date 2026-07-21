@@ -1,12 +1,12 @@
 {
-  "version": "6.0.4",
-  "notes": "修复桌面端打开外部链接后整个窗口被劫持、无法返回（外链改为系统浏览器打开）。",
+  "version": "6.0.8",
+  "notes": "同步仓库后展示本次从上游拉取的 skill 变更（新增/更新/移除），单仓与全量一致；预设编辑弹窗的过滤框固定在顶部，滚动列表时不再跟着滚走；npx skills 弹窗启用/停用后保留列表滚动位置，不跳回顶部。此前版本引入的可复用「分组（Preset）」批量启用能力亦包含在内。",
   "assets": {
-    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.4/SkillManager-desktop-macos-v6.0.4.zip",
-    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.4/SkillManager-desktop-windows-v6.0.4.zip"
+    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.8/SkillManager-desktop-macos-v6.0.8.zip",
+    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.8/SkillManager-desktop-windows-v6.0.8.zip"
   },
   "sha256": {
-    "desktop-macos": "c2c99372362dd2d05da6d31021b4e865e92b03c8c9dce39b3589eb86047c8f1d",
-    "desktop-windows": "0f93cc5b620cdebdc251cfbeb261f2172da5f6ed3f064de7888e32d48c16e506"
+    "desktop-macos": "28300978af36b6d09ab5de6be67dbdae71fdc6ac073ae6f601f9e4300174659f",
+    "desktop-windows": "34b58dc5c8c0e057ac6583e6215177198450adc134d829263b9e256b5113fd38"
   }
 }

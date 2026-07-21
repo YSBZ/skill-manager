@@ -74,6 +74,21 @@ type EnabledEntry struct {
 	Mode   Mode   `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
+// Preset is a named, reusable GROUP of skill selections — an abstraction over
+// skills already in the library, NOT a copy of any skill. Applying a preset to a
+// target batch-enables its selectors there (additively); removing it batch-
+// disables them. Target-independent: the same preset can be applied to any target.
+type Preset struct {
+	Name   string        `yaml:"name" json:"name"`
+	Skills []PresetSkill `yaml:"skills" json:"skills"`
+}
+
+// PresetSkill is one selector inside a preset — an EnabledEntry minus the target.
+type PresetSkill struct {
+	Skill string `yaml:"skill" json:"skill"`
+	Mode  Mode   `yaml:"mode,omitempty" json:"mode,omitempty"`
+}
+
 // Schedule controls the daily sync cadence.
 type Schedule struct {
 	// DailyAt is the local wall-clock time "HH:MM" the daily cycle fires.
@@ -108,7 +123,11 @@ type Config struct {
 	// namespace. We link FROM them but never modify the originals (invariant ②/④).
 	// omitempty so older configs round-trip unchanged.
 	LocalSources []DirectorySource `yaml:"local_sources,omitempty"`
-	Schedule     Schedule          `yaml:"schedule"`
+	// Presets are named, reusable groups of skill selectors (an abstraction over
+	// the library; never copies). Applied/removed against a target in batch.
+	// omitempty so older configs round-trip unchanged.
+	Presets  []Preset `yaml:"presets,omitempty"`
+	Schedule Schedule `yaml:"schedule"`
 }
 
 // LinkRecord is one daemon-owned link.

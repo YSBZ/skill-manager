@@ -81,7 +81,7 @@ func TestAddCommitPushRoundTrip(t *testing.T) {
 	if err := s.Add(ctx, mirror, "skill-b"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	committed, err := s.Commit(ctx, mirror, "skill-b a contributed skill")
+	committed, err := s.Commit(ctx, mirror, "MIC-0 skill-b a contributed skill")
 	if err != nil || !committed {
 		t.Fatalf("commit: committed=%v err=%v", committed, err)
 	}
@@ -108,7 +108,7 @@ func TestCommitNothingStaged(t *testing.T) {
 	s := newTestSyncer(t)
 	bare := makeBareRemote(t)
 	mirror := cloneMirror(t, bare)
-	committed, err := s.Commit(context.Background(), mirror, "noop nothing")
+	committed, err := s.Commit(context.Background(), mirror, "MIC-0 noop nothing")
 	if err != nil {
 		t.Fatalf("commit with nothing staged should not error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestPushNonFastForward(t *testing.T) {
 	if err := s.Add(ctx, mirror, "skill-c"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Commit(ctx, mirror, "skill-c stale"); err != nil {
+	if _, err := s.Commit(ctx, mirror, "MIC-0 skill-c stale"); err != nil {
 		t.Fatal(err)
 	}
 	err := s.Push(ctx, mirror, "main")

@@ -23,7 +23,7 @@ var (
 )
 
 // updateCheckTTL bounds how often the feed is polled — the UI may query the
-// endpoint on every load/focus, but the feed host is hit at most this often.
+// endpoint on every load/focus, but the company GitLab is hit at most this often.
 const updateCheckTTL = time.Hour
 
 // latestManifest is the shape of the feed's latest.json.
@@ -56,10 +56,10 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	m, err := fetchLatestManifest(ctx, UpdateFeed, UpdateToken)
 	if err != nil {
-		// Feed host unreachable / offline → degrade quietly, do not cache.
+		// Internal GitLab unreachable / not on VPN → degrade quietly, do not cache.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"enabled": true, "newer": false, "current": Version,
-			"error": "查询更新失败（可能无法访问更新源）",
+			"error": "查询更新失败（可能不在公司网络）",
 		})
 		return
 	}
@@ -79,7 +79,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// fetchLatestManifest GETs the feed's latest.json (a raw file / release asset),
+// fetchLatestManifest GETs the feed's latest.json (GitLab raw/release asset),
 // authenticating with the read-only token via the PRIVATE-TOKEN header.
 func fetchLatestManifest(ctx context.Context, feed, token string) (*latestManifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)

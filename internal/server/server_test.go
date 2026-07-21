@@ -364,24 +364,23 @@ func TestRemoveTargetTearsDownLinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: demo\n---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, step := range []struct {
-		path string
-		body map[string]string
-	}{
-		{"/api/targets", map[string]string{"dir": dir}},
-		{"/api/adopt", map[string]string{"id": "demo", "root": dir}},
-	} {
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req("POST", step.path, s.token, step.body))
-		if w.Code != http.StatusOK && w.Code != http.StatusCreated {
-			t.Fatalf("%s: %d body=%s", step.path, w.Code, w.Body.String())
-		}
+	// Register the plain dir as a target directly. Adding a plain folder via the
+	// API now prompts for which harness dir (cc/codex) to scaffold; that UX is
+	// covered by the harness tests. Here we only need the target registered so the
+	// adopt + remove mechanics can be exercised.
+	s.mu.Lock()
+	s.cfg.Targets = []string{dir}
+	s.mu.Unlock()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req("POST", "/api/adopt", s.token, map[string]string{"id": "demo", "root": dir}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("adopt: %d body=%s", w.Code, w.Body.String())
 	}
 	if fi, _ := os.Lstat(skill); fi == nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("precondition: %s should be a managed symlink after adopt", skill)
 	}
 	// removing the tab must tear that symlink off disk, not just drop config
-	w := httptest.NewRecorder()
+	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req("DELETE", "/api/targets", s.token, map[string]string{"dir": dir}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("remove target: %d", w.Code)
@@ -458,12 +457,13 @@ func TestAdoptAddsEnabledMapping(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: demo\n---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Register the plain dir as a target directly (adding a plain folder via the
+	// API now prompts for cc/codex — covered by the harness tests); this test is
+	// about adopt recording a first-class @local mapping.
+	s.mu.Lock()
+	s.cfg.Targets = []string{dir}
+	s.mu.Unlock()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req("POST", "/api/targets", s.token, map[string]string{"dir": dir}))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("add target: %d", w.Code)
-	}
-	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req("POST", "/api/adopt", s.token, map[string]string{"id": "demo", "root": dir}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("adopt: %d body=%s", w.Code, w.Body.String())

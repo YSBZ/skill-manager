@@ -1,19 +1,19 @@
-# OPTIONAL private feed override. The public build already has a default update
-# feed baked in (this project's GitHub raw latest.json → public release assets,
-# no token needed). You only need this file to point the desktop self-update at a
-# DIFFERENT, private feed (e.g. a self-hosted GitLab) — typically for an internal
-# distribution. COPY to build/update.local (gitignored) on the build machine.
+# Company-private online-update config — COPY to build/update.local (gitignored)
+# on the build machine to enable the desktop self-update against the company
+# GitLab. A public build omits build/update.local → the update check is disabled
+# and NO company info enters the binary or the repo.
 #
-#   cp build/update.local.example build/update.local   # then fill in, build-machine only
+#   cp build/update.local.example build/update.local   # then fill in, on the build machine only
 #
-# The Makefile `-include`s build/update.local AFTER the public default, so these
-# assignments win. Values are injected via -ldflags -X main.updateFeed /
-# -X main.updateToken; build/update.local itself is never committed.
+# Makefile `-include`s build/update.local and injects these via
+# -ldflags -X main.updateFeed / -X main.updateToken into both the web and desktop
+# binaries. See docs/plans/phase6-online-update.md.
 
-# URL of your feed's latest.json (a raw file or a release asset).
-UPDATE_FEED = https://<your-host>/<group>/skill-manager/-/raw/main/release/latest.json
+# URL of the feed's latest.json on the company GitLab (raw file or release asset).
+# The app GETs it with the read-only token below (PRIVATE-TOKEN header).
+UPDATE_FEED = https://<your-gitlab-host>/<group>/skill-manager/-/raw/main/release/latest.json
 
-# A read-only token if your feed needs auth (private host); leave empty for a
-# public feed. Low-privilege and revocable; lives ONLY here on the build machine
-# and is baked into that build — never committed.
-UPDATE_TOKEN = <read-only-token-or-empty>
+# A read-only GitLab Deploy Token scoped to this project (read_repository /
+# read_package_registry). Internal, low-privilege, revocable. Lives ONLY here on
+# the build machine; it is baked into the private binary, never committed.
+UPDATE_TOKEN = <read-only-deploy-token>

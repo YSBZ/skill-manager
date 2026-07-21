@@ -47,7 +47,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/update-apply", s.requireAuth(s.handleUpdateApply))
 	mux.HandleFunc("GET /api/adoptable", s.requireAuth(s.handleAdoptable))
 	mux.HandleFunc("GET /api/inventory", s.requireAuth(s.handleInventory))
+	mux.HandleFunc("GET /api/inherited", s.requireAuth(s.handleInherited))
 	mux.HandleFunc("DELETE /api/inventory/link", s.requireAuth(s.handleDeleteStrayLink))
+	mux.HandleFunc("POST /api/relink-archived", s.requireAuth(s.handleRelinkArchived))
 	mux.HandleFunc("DELETE /api/inventory/handwritten", s.requireAuth(s.handleDeleteHandwritten))
 	mux.HandleFunc("DELETE /api/local-skill", s.requireAuth(s.handleDeleteLocalSkill))
 	mux.HandleFunc("POST /api/ignore-plugins", s.requireAuth(s.handleSetIgnorePlugins))
@@ -65,6 +67,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/local-source", s.requireAuth(s.handleRemoveLocalSource))
 	mux.HandleFunc("POST /api/enabled", s.requireAuth(s.handleAddEnabled))
 	mux.HandleFunc("DELETE /api/enabled", s.requireAuth(s.handleRemoveEnabled))
+	mux.HandleFunc("GET /api/presets", s.requireAuth(s.handleListPresets))
+	mux.HandleFunc("POST /api/presets", s.requireAuth(s.handleCreatePreset))
+	mux.HandleFunc("PUT /api/presets", s.requireAuth(s.handleSetPreset))
+	mux.HandleFunc("DELETE /api/presets", s.requireAuth(s.handleDeletePreset))
+	mux.HandleFunc("POST /api/presets/apply", s.requireAuth(s.handleApplyPreset))
+	mux.HandleFunc("POST /api/presets/remove", s.requireAuth(s.handleRemovePreset))
 	mux.HandleFunc("POST /api/targets", s.requireAuth(s.handleAddTarget))
 	mux.HandleFunc("DELETE /api/targets", s.requireAuth(s.handleRemoveTarget))
 	mux.HandleFunc("POST /api/targets/reorder", s.requireAuth(s.handleReorderTargets))
@@ -1672,6 +1680,41 @@ type inventoryResp struct {
 	Items  []inventoryItem    `json:"items"`
 }
 
+// handleInherited lists the skills a target INHERITS from higher levels (parent
+// dirs / user-global) per its harness's runtime discovery rules, so the UI can
+// flag which skills are already available from above and need not be re-enabled
+// here (avoid duplicates). Read-only: it shallow-scans the ancestor skill dirs
+// returned by harness.AncestorSkillDirs; nearest level wins on a name clash.
+func (s *Server) handleInherited(w http.ResponseWriter, r *http.Request) {
+	target := strings.TrimSpace(r.URL.Query().Get("target"))
+	if target == "" {
+		http.Error(w, "missing target", http.StatusBadRequest)
+		return
+	}
+	type inh struct {
+		Name  string `json:"name"`
+		From  string `json:"from"`  // the ancestor skills dir it comes from
+		Scope string `json:"scope"` // "user" | "project"
+	}
+	out := []inh{}
+	seen := map[string]bool{}
+	for _, dir := range harness.AncestorSkillDirs(target) {
+		skills, err := scanner.ScanInventory(dir)
+		if err != nil {
+			continue
+		}
+		scope := string(harness.Scope(dir))
+		for _, sk := range skills {
+			if seen[sk.LinkName] { // nearest level already claimed this name
+				continue
+			}
+			seen[sk.LinkName] = true
+			out = append(out, inh{Name: sk.LinkName, From: dir, Scope: scope})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"inherited": out})
+}
+
 // handleInventory lists the skills actually present in one sync target, each
 // attributed to a source (git / local / skills.sh / plugin / handwritten /
 // unknown). It replaces the old "list repo candidates" main panel (R3.1). The
@@ -2021,6 +2064,93 @@ func (s *Server) handleDeleteStrayLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleRelinkArchived resolves the "diverged" sync error: the managed store
+// already holds the skill (it is enabled from an archived/managed source), but
+// the sync target now holds a REAL file/dir instead of our symlink (another tool
+// replaced the link). Because the archive still exists, deleting the target copy
+// loses nothing — so, unlike handleDeleteStrayLink (which refuses real paths), we
+// DO remove the real path here, then reconcile to recreate the symlink.
+//
+// This is a user-initiated, UI-confirmed exception to never-break, tightly
+// gated: the target must be configured, the name must be a single safe segment,
+// a desired link for (target,name) must exist, and its Source (the archive) must
+// exist on disk BEFORE we delete anything. If the on-disk path is already our
+// symlink, we just reconcile.
+func (s *Server) handleRelinkArchived(w http.ResponseWriter, r *http.Request) {
+	if !originGuard(w, r) {
+		return
+	}
+	var req strayLinkReq
+	if err := readJSON(r, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid link name"})
+		return
+	}
+	want := harness.Expand(strings.TrimSpace(req.Target))
+	s.mu.Lock()
+	configured := ""
+	for _, d := range s.cfg.Targets {
+		if harness.Expand(d) == want {
+			configured = d
+			break
+		}
+	}
+	// The desired link's Source is the authoritative archive path reconcile would
+	// link to — derive it from the plan, never trust a client-supplied path.
+	src := ""
+	if configured != "" {
+		s.reconciler.SetAgentsRoot(s.agentsRootLocked())
+		s.reconciler.SetDirSources(s.dirSourceMapLocked())
+		for _, d := range s.reconciler.DesiredLinks(s.cfg) {
+			if harness.Expand(d.Target) == want && d.LinkName == name {
+				src = d.Source
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	if configured == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown sync target"})
+		return
+	}
+	if src == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "该 skill 未在此目录启用，无法重新链接"})
+		return
+	}
+	// Safety gate: the archive must exist, else removing the target copy would
+	// destroy the only copy. This is what makes deleting the real path safe.
+	if _, err := os.Stat(src); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "库中归档不存在，拒绝删除本地（避免丢失内容）"})
+		return
+	}
+	// Resolve the actual on-disk path by LinkName (filename may differ from name).
+	p := ""
+	if inv, err := scanner.ScanInventory(want); err == nil {
+		for _, sk := range inv {
+			if sk.LinkName == name {
+				p = sk.Dir
+				break
+			}
+		}
+	}
+	if p == "" {
+		p = filepath.Join(want, name)
+	}
+	if lst, err := os.Lstat(p); err == nil && lst.Mode()&os.ModeSymlink == 0 {
+		// A real file/dir occupies the target. Archive exists → safe to remove it.
+		if err := os.RemoveAll(p); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	// Recreate the symlink → archive (a no-op if it was already correct).
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "summary": s.ReconcileOnly()})
 }
 
 // handleDeleteHandwritten deletes a handwritten skill — a REAL directory living
@@ -3000,6 +3130,11 @@ func (s *Server) handleRemoveEnabled(w http.ResponseWriter, r *http.Request) {
 type targetReq struct {
 	Dir   string `json:"dir"`
 	Alias string `json:"alias"`
+	// Create names the harness skill dirs to scaffold under Dir when neither a CC
+	// nor a Codex dir is recognized: "cc" → <dir>/.claude/skills, "codex" →
+	// <dir>/.agents/skills. Empty on the first call; the UI asks the user, then
+	// re-POSTs with the chosen kinds.
+	Create []string `json:"create,omitempty"`
 }
 
 func (s *Server) handleAddTarget(w http.ResponseWriter, r *http.Request) {
@@ -3032,7 +3167,26 @@ func (s *Server) handleAddTarget(w http.ResponseWriter, r *http.Request) {
 	// nothing cc/codex is found (preserving the ability to add an unknown dir).
 	dirs := harness.SkillDirsFor(dir)
 	if len(dirs) == 0 {
-		dirs = []string{dir}
+		switch {
+		case harness.Classify(dir) != harness.HarnessUnknown:
+			// The folder itself is a recognized cc/codex path by convention (e.g. a
+			// .claude/skills that just doesn't exist on disk yet) — add it verbatim,
+			// as before. Only a truly unrecognized folder needs a choice.
+			dirs = []string{dir}
+		case len(req.Create) == 0:
+			// Neither a CC nor a Codex dir, and no .claude/.codex/.agents home to
+			// fill. Rather than silently adding an "unknown" target, ask which harness
+			// dir(s) to scaffold here. The UI re-POSTs with req.Create chosen.
+			writeJSON(w, http.StatusOK, map[string]any{"needsChoice": true, "dir": dir})
+			return
+		default:
+			created, err := harness.CreateSkillDirs(dir, req.Create)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			dirs = created
+		}
 	}
 
 	s.mu.Lock()
@@ -3378,8 +3532,16 @@ func (s *Server) handleUpdateRepo(w http.ResponseWriter, r *http.Request) {
 	if st.State == string(gitsync.ActionFailed) || strings.TrimSpace(st.Error) != "" {
 		log.Printf("update-repo %s: state=%s error=%s", url, st.State, st.Error)
 	}
+	// Surface which skills THIS sync pulled from upstream (added/updated/removed),
+	// same shape as the update-all endpoint's `updates`, so the UI can show the
+	// per-repo update content instead of a bare "已同步" toast.
+	updates := []map[string]any{}
+	if len(st.Changes) > 0 {
+		updates = append(updates, map[string]any{"repo": st.Name, "changes": st.Changes})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"summary": sum,
+		"updates": updates,
 		"dirty":   st.Dirty && st.State == string(gitsync.ActionDirtySkip),
 		"state":   st.State,
 		"error":   st.Error,
@@ -3403,9 +3565,19 @@ func (s *Server) handleUpdateNow(w http.ResponseWriter, r *http.Request) {
 	// The UI uses this to offer a "还原并更新" (force) confirmation.
 	s.mu.Lock()
 	dirtyRepos := []string{}
+	// Per-repo skill changes this sync pulled (added/updated/removed), so the UI
+	// can show the update content. Only repos with actual changes are included.
+	updates := []map[string]any{}
 	for _, repo := range s.cfg.Repos {
-		if st, ok := s.repoStatus[repo.URL]; ok && st.Dirty && st.State == string(gitsync.ActionDirtySkip) {
+		st, ok := s.repoStatus[repo.URL]
+		if !ok {
+			continue
+		}
+		if st.Dirty && st.State == string(gitsync.ActionDirtySkip) {
 			dirtyRepos = append(dirtyRepos, st.Name)
+		}
+		if len(st.Changes) > 0 {
+			updates = append(updates, map[string]any{"repo": st.Name, "changes": st.Changes})
 		}
 	}
 	s.mu.Unlock()
@@ -3417,6 +3589,7 @@ func (s *Server) handleUpdateNow(w http.ResponseWriter, r *http.Request) {
 		"conflicts":  sum.Conflicts,
 		"errors":     sum.Errors,
 		"dirtyRepos": dirtyRepos,
+		"updates":    updates,
 	})
 }
 

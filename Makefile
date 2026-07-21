@@ -6,14 +6,11 @@ GUIDE   := docs/dist-readme.md
 # and every artifact filename (zips + dmg) follows automatically. Defined BEFORE the
 # flag vars below so -X main.version=$(VERSION) expands to the real value (:= is immediate).
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/macos/Info.plist 2>/dev/null)
-# Online-update config. The PUBLIC default points at this repo's update feed on
-# GitHub (a public raw file → release assets), needing NO token. It is committed
-# because nothing here is secret. A private deployment can override the feed (and
-# add a read-only token) via the gitignored build/update.local, which `-include`
-# loads AFTER these defaults so its `=` assignments win. A build with neither a
-# default nor an override leaves these empty → update check disabled.
+# Company-private online-update values (feed URL + read-only token), injected at
+# build time and NEVER committed: build/update.local is gitignored. A public build
+# (file absent) leaves UPDATE_FEED/UPDATE_TOKEN empty → update check disabled, no
+# company info in the binary. See docs/plans/phase6-online-update.md.
 UPDATE_FEED ?= https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json
-UPDATE_TOKEN ?=
 -include build/update.local
 UPDATE_LDFLAGS := -X main.updateFeed=$(UPDATE_FEED) -X main.updateToken=$(UPDATE_TOKEN)
 # main.version is stamped into the binary so `skillmanager` prints its release on startup.

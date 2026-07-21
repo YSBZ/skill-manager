@@ -125,6 +125,16 @@ type Result struct {
 	// UI can show what was preserved (新增/修改/已提交未推送) and offer 快捷上传.
 	// Empty on a clean or freshly-cloned repo.
 	Drift Drift
+	// Files lists the repo-relative paths this integration changed (from
+	// `git diff --name-status old..new`), so the server can report which skills an
+	// update added/modified/removed. Empty on clone, no-op, or failure.
+	Files []FileChange
+}
+
+// FileChange is one path changed between the pre- and post-integration commit.
+type FileChange struct {
+	Path   string // repo-relative path (the new path on a rename)
+	Status string // "A" | "M" | "D" | "R" | "C" (first letter of git's status code)
 }
 
 // Syncer runs git against a resolved git binary with an empty hooks directory
@@ -205,6 +215,10 @@ func (s *Syncer) sync(ctx context.Context, dir, remote string, opts Options) Res
 		return res
 	}
 
+	// HEAD before integrating — a successful sync diffs prev..new to report which
+	// skills the update touched.
+	prev := s.revSHA(ctx, dir, "HEAD")
+
 	ref := "origin/HEAD"
 	if opts.Branch != "" {
 		ref = "origin/" + opts.Branch
@@ -226,7 +240,7 @@ func (s *Syncer) sync(ctx context.Context, dir, remote string, opts Options) Res
 		if opts.KeepLocal {
 			// 仅更新: pull upstream while PRESERVING local add/delete/modify; a
 			// conflict is reported (never discarded) for the user to resolve.
-			return s.updateKeepingLocal(ctx, dir, ref, res)
+			return s.updateKeepingLocal(ctx, dir, ref, prev, res)
 		}
 		// else: caller explicitly chose to discard local changes — fall through to
 		// the hard align below.
@@ -242,6 +256,7 @@ func (s *Syncer) sync(ctx context.Context, dir, remote string, opts Options) Res
 		res.Action, res.Err, res.Stderr = ActionFailed, err, stderr
 		return res
 	}
+	res.Files = s.changedFiles(ctx, dir, prev, ref)
 	res.OK, res.Action = true, ActionSynced
 	return res
 }
@@ -254,7 +269,7 @@ func (s *Syncer) sync(ctx context.Context, dir, remote string, opts Options) Res
 // Any conflict — merging commits or restoring the working tree — is reported as
 // ActionConflict and left in place for the user to resolve with git; nothing is
 // ever auto-discarded. A re-run of「同步仓库」can then upload the local changes.
-func (s *Syncer) updateKeepingLocal(ctx context.Context, dir, ref string, res Result) Result {
+func (s *Syncer) updateKeepingLocal(ctx context.Context, dir, ref, prev string, res Result) Result {
 	// Stash only when the working tree actually has changes (committed-unpushed
 	// drift has a clean tree and nothing to stash). `status --porcelain` already
 	// excludes the ignored OS junk, so it never stashes cruft.
@@ -287,8 +302,46 @@ func (s *Syncer) updateKeepingLocal(ctx context.Context, dir, ref string, res Re
 			return res
 		}
 	}
+	res.Files = s.changedFiles(ctx, dir, prev, "HEAD")
 	res.OK, res.Action = true, ActionSynced
 	return res
+}
+
+// revSHA resolves a revision to its commit SHA, "" on error (e.g. an unborn
+// HEAD on a just-cloned empty repo). Used to pin the pre-integration commit.
+func (s *Syncer) revSHA(ctx context.Context, dir, rev string) string {
+	out, _, err := s.run(ctx, dir, "rev-parse", rev)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// changedFiles returns the repo-relative paths changed between commits a and b
+// via `git diff --name-status a..b`. Empty when either SHA is unknown, they are
+// equal (no update), or git errors — callers treat that as "no reportable change".
+func (s *Syncer) changedFiles(ctx context.Context, dir, a, b string) []FileChange {
+	if a == "" || b == "" || a == b {
+		return nil
+	}
+	out, _, err := s.run(ctx, dir, "diff", "--name-status", a+".."+b)
+	if err != nil {
+		return nil
+	}
+	var fc []FileChange
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// "A\tpath", "M\tpath", "D\tpath", or "R100\told\tnew" / "C75\tsrc\tdst".
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		fc = append(fc, FileChange{Status: fields[0][:1], Path: fields[len(fields)-1]})
+	}
+	return fc
 }
 
 // CheckUpdate reports whether origin's branch (or HEAD when branch is empty) is

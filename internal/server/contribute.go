@@ -16,18 +16,22 @@ import (
 	"skillmanage/internal/scanner"
 )
 
+// commitTicket is the fixed ticket-prefix literal for contribution commits. The
+// brainstorm deliberately scoped this as a constant, not a ticket-system input.
+const commitTicket = "MIC-0"
+
 // maxCommitDescRunes bounds the editable commit summary so a pasted multi-page
 // description cannot bloat the commit subject.
 const maxCommitDescRunes = 200
 
-// commitMessage builds "<skill> <description>", falling back to "<skill>" when
-// the (sanitized) description is empty.
+// commitMessage builds "MIC-0 <skill> <description>", falling back to
+// "MIC-0 <skill>" when the (sanitized) description is empty.
 func commitMessage(skill, desc string) string {
 	d := sanitizeCommitDesc(desc)
 	if d == "" {
-		return skill
+		return commitTicket + " " + skill
 	}
-	return skill + " " + d
+	return commitTicket + " " + skill + " " + d
 }
 
 // sanitizeCommitDesc folds the description to a single safe line: control
@@ -111,7 +115,7 @@ func pushErrorResponse(w http.ResponseWriter, err error) {
 // handleContribute moves a hand-authored skill into a registered git source repo
 // (copy → verify → atomic rename, then an in-place symlink), records the
 // <repo>/<skill> enabled mapping so reconcile keeps the link, then add+commit
-// (commit) + push. On push failure the skill stays committed-unpushed and is
+// (MIC-0 …) + push. On push failure the skill stays committed-unpushed and is
 // preserved; nothing is force-pushed or rolled back (R1–R5, AE3). CSRF-guarded
 // and serialized per repo against the daily/manual sync.
 func (s *Server) handleContribute(w http.ResponseWriter, r *http.Request) {
@@ -932,7 +936,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	msg := strings.TrimSpace(req.Message)
 	if msg == "" {
-		msg = "更新 " + strings.Join(names, ", ")
+		msg = commitTicket + " 更新 " + strings.Join(names, ", ")
 	} else if rs := []rune(msg); len(rs) > 2000 {
 		msg = strings.TrimSpace(string(rs[:2000]))
 	}

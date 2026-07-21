@@ -161,7 +161,7 @@ func TestQuickUploadRepushesCommittedUnpushed(t *testing.T) {
 	// (so a later push fast-forwards cleanly).
 	writeHandwritten(t, mirror, "qu-skill", "quick")
 	gitRun(t, mirror, "add", "-A")
-	gitRun(t, mirror, "commit", "-q", "-m", "qu-skill quick")
+	gitRun(t, mirror, "commit", "-q", "-m", "MIC-0 qu-skill quick")
 	beforeCount := strings.TrimSpace(gitRun(t, mirror, "rev-list", "--count", "HEAD"))
 
 	w := httptest.NewRecorder()
@@ -189,7 +189,7 @@ func TestQuickUploadCommitsWorkingTreeChange(t *testing.T) {
 	// A skill already in the repo (committed + pushed), then edited locally.
 	writeHandwritten(t, mirror, "edit-skill", "v1")
 	gitRun(t, mirror, "add", "-A")
-	gitRun(t, mirror, "commit", "-q", "-m", "edit-skill v1")
+	gitRun(t, mirror, "commit", "-q", "-m", "MIC-0 edit-skill v1")
 	gitRun(t, mirror, "push", "-q", "origin", "main")
 	if err := os.WriteFile(filepath.Join(mirror, "edit-skill", "SKILL.md"), []byte("---\nname: edit-skill\ndescription: v2\n---\nedited\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -374,15 +374,15 @@ func TestMoveRejectsSameRepoAndCSRF(t *testing.T) {
 }
 
 func TestSanitizeCommitDesc(t *testing.T) {
-	if got := commitMessage("foo", "line one\nline two\twith\ttabs"); got != "foo line one line two with tabs" {
+	if got := commitMessage("foo", "line one\nline two\twith\ttabs"); got != "MIC-0 foo line one line two with tabs" {
 		t.Errorf("multiline desc folded wrong: %q", got)
 	}
-	if got := commitMessage("foo", "   "); got != "foo" {
+	if got := commitMessage("foo", "   "); got != "MIC-0 foo" {
 		t.Errorf("empty desc fallback wrong: %q", got)
 	}
 	long := strings.Repeat("x", 300)
 	got := commitMessage("foo", long)
-	if len([]rune(got)) > len("foo ")+maxCommitDescRunes {
+	if len([]rune(got)) > len("MIC-0 foo ")+maxCommitDescRunes {
 		t.Errorf("desc not truncated: len=%d", len([]rune(got)))
 	}
 }
@@ -397,7 +397,7 @@ func TestUploadMultipleSkills(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req("POST", "/api/upload", s.token,
-		map[string]any{"repo": repo, "skills": []string{"up-a", "up-b"}, "message": "两个 skill"}))
+		map[string]any{"repo": repo, "skills": []string{"up-a", "up-b"}, "message": "MIC-0 两个 skill"}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
 	}
@@ -413,7 +413,7 @@ func TestUploadNothingToPush(t *testing.T) {
 	mirror := filepath.Join(s.reposRoot, repo)
 	writeHandwritten(t, mirror, "clean", "v1")
 	gitRun(t, mirror, "add", "-A")
-	gitRun(t, mirror, "commit", "-q", "-m", "clean v1")
+	gitRun(t, mirror, "commit", "-q", "-m", "MIC-0 clean v1")
 	gitRun(t, mirror, "push", "-q", "origin", "main")
 
 	w := httptest.NewRecorder()
@@ -537,7 +537,7 @@ func TestUploadPushesDeletion(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req("POST", "/api/upload", s.token,
-		map[string]any{"repo": repo, "skills": []string{"skills/gone"}, "message": "删除 gone"}))
+		map[string]any{"repo": repo, "skills": []string{"skills/gone"}, "message": "MIC-0 删除 gone"}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload deletion: %d %s", w.Code, w.Body.String())
 	}
