@@ -14,7 +14,7 @@ Core idea: links point at **live git mirrors**, and a daily `fetch` makes every 
 
 Download the desktop package for your platform from [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest); no build is needed.
 
-- **macOS**: download `SkillManager-desktop-macos-vX.Y.Z.dmg` (recommended) — open it and drag `SkillManager.app` onto the `Applications` shortcut in the window, then launch (installing into `/Applications` also avoids App Translocation); or use `SkillManager-desktop-macos-vX.Y.Z.zip` — unzip and drag into `/Applications`.
+- **macOS**: download `SkillManager-vX.Y.Z.dmg` (recommended) — open it and drag `SkillManager.app` onto the `Applications` shortcut in the window, then launch (installing into `/Applications` also avoids App Translocation); or use `SkillManager-desktop-macos-vX.Y.Z.zip` — unzip and drag into `/Applications`.
 - **Windows**: `SkillManager-desktop-windows-vX.Y.Z.zip` — unzip and run `SkillManager.exe` (app icon embedded, no console window on double-click).
 
 > **macOS note**: the package uses local ad-hoc signing and is not Apple-notarized. Gatekeeper may block the first launch; follow macOS's Privacy & Security prompt after confirming the download. Apple documents the available steps [here](https://support.apple.com/en-us/102445).

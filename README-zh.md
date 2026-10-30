@@ -14,7 +14,7 @@
 
 从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 下载对应平台的桌面包，无需自行构建。
 
-- **macOS**：推荐下载 `SkillManager-desktop-macos-vX.Y.Z.dmg`，双击打开后把 `SkillManager.app` 拖到窗口里的 `Applications` 快捷方式再启动（装进 `/Applications` 还能避开 App Translocation）；也可用 `SkillManager-desktop-macos-vX.Y.Z.zip`，解压后手动拖进 `/Applications`。
+- **macOS**：推荐下载 `SkillManager-vX.Y.Z.dmg`，双击打开后把 `SkillManager.app` 拖到窗口里的 `Applications` 快捷方式再启动（装进 `/Applications` 还能避开 App Translocation）；也可用 `SkillManager-desktop-macos-vX.Y.Z.zip`，解压后手动拖进 `/Applications`。
 - **Windows**：`SkillManager-desktop-windows-vX.Y.Z.zip`，解压后运行 `SkillManager.exe`（已嵌入应用图标，双击无控制台窗口）。
 
 > **macOS 注意**：安装包使用本地 ad-hoc 签名，未经 Apple 公证。首次打开时 Gatekeeper 可能拦截；请先确认下载来源，再按「隐私与安全性」中的系统提示操作。Apple 的说明见[此处](https://support.apple.com/en-us/102445)。
