@@ -1,13 +1,13 @@
 {
   "version": "1.1.0",
   "releaseCode": "64",
-  "notes": "新增 AIHOT 资讯与相关 Skill 搜索、GitHub 近周增长和新项目发现、模型榜与重置日历；增加亮暗主题和清晰的异常状态色。桌面服务随 App 启动，内含便携 Git/npm JS/Skills CLI，改用本机 Node.js >=22.20.0，仅在相关操作缺失时提示。Windows 旧版须完整解压 ZIP 保留 runtime；GitHub 历史 v6.0.x 须手动安装一次迁移至 1.x。",
+  "notes": "新增 AIHOT 资讯与相关 Skill 搜索、GitHub 近周增长和新项目发现、模型榜与重置日历；增加亮暗主题与清晰状态色。双击运行，内含便携 Git/npm JS/Skills CLI，使用本机 Node.js >=22.20.0，缺失时仅在相关操作提示。精简 Mac 运行时，修复 Git 超时边界和 Windows 后续整包更新。GitHub 历史 v6.0.x 须手动完整安装一次；Windows 旧版请完整解压 ZIP 并保留 runtime。",
   "assets": {
     "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.0/SkillManager-desktop-macos-v1.1.0.zip",
     "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.0/SkillManager-desktop-windows-v1.1.0.zip"
   },
   "sha256": {
-    "desktop-macos": "dee9764758470b9e14a6fff3b4fe9d72d190e27556748373d011918abc9496bc",
-    "desktop-windows": "46a6657737baf57a24b85afe286892c54a79e87af7b41020c0b27d46c95f5261"
+    "desktop-macos": "b7bac00b57dce6e1d50798432dd089aa423d4e84e5197efbd98c889285da5c51",
+    "desktop-windows": "f9054990b04c85c8f91a2abcc521c979d9b1e5770a7be0ffe0892ae810ccf164"
   }
 }
