@@ -99,6 +99,19 @@ func (f *fakeRunner) SkillsRemove(ctx context.Context, npxPath, name string) (st
 	return f.stdout, f.stderr, f.err
 }
 
+func (f *fakeRunner) SkillHubSearch(ctx context.Context, npxPath, query string) (string, string, error) {
+	f.calls++
+	return f.stdout, f.stderr, f.err
+}
+func (f *fakeRunner) SkillHubInstall(ctx context.Context, npxPath, slug, dir string) (string, string, error) {
+	f.calls++
+	return f.stdout, f.stderr, f.err
+}
+func (f *fakeRunner) SkillHubRemove(ctx context.Context, npxPath, slug, dir string) (string, string, error) {
+	f.calls++
+	return f.stdout, f.stderr, f.err
+}
+
 // setupDirSource wires a server with a fake npx + a ~/.agents/skills holding one
 // real skill dir named "find-skills".
 func setupDirSource(t *testing.T) (*Server, *fakeRunner) {

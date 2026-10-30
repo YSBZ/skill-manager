@@ -1,18 +1,18 @@
-# SkillManage 使用说明
+# SkillManage Web/Headless 包使用说明
 
-一个「同步 skill」的小工具：跟踪你的 git skill 仓、每天自动保持最新，并把选中的 skill 软链进 Claude Code / Codex 的 skill 目录。零安装、零更新动作——单个可执行文件，UI 内置。
+本文只适用于旧版跨平台 Web/Headless 包（`SkillManager-web-*`，启动后打开浏览器）。Web/Headless 包不携带 Git 或 Node.js，并继续依赖本机工具。桌面包请按包内独立说明使用：桌面包提供 Git、npm JavaScript CLI 和 Skills CLI；桌面 Node 功能仍要求本机 Node.js 22.20.0 或更新版本。
 
-## 0. 前置：需要 git
+## 0. 前置：Web/Headless 包需要系统 Git
 
-本工具靠 git 拉取/更新 skill 仓，所以机器上**必须装有 Git 且在 PATH 中**。
+Web/Headless 包靠 git 拉取/更新 skill 仓，所以机器上**必须装有 Git 且在 PATH 中**。如果使用在线 Skill 安装，还需要可用的 `npx`（Node.js）。桌面包自带 Git 和 npm JavaScript CLI，不需要系统 Git 或 npm；但其 Node 功能仍要求系统 Node.js 22.20.0 或更新版本。
 
 - Windows：装 [Git for Windows](https://git-scm.com/download/win)，安装时选「Git from the command line…」让它进 PATH，装完**重开终端/重启工具**。
 - macOS：`git --version`（没有会提示装 Xcode Command Line Tools），或 `brew install git`。
 - Linux/WSL：`sudo apt install git` 等。
 
-没装 git 工具也能起来，但顶部会红条提示、且无法同步仓库。
+没装 git 工具也能起来，但顶部会红条提示、且无法同步仓库。上述系统 Git 与 Node 说明针对 Web/Headless 包；桌面包自带 Git。桌面包的 Node 功能若缺少 Node.js，会在相关操作时提示官方下载；不影响启动或资讯、日历、模型榜等功能。
 
-## 1. 运行
+## 1. 运行 Web/Headless 包
 
 这个 zip 里有一个可执行文件（`skillmanage` 或 `skillmanage.exe`）。启动后会**自动在默认浏览器打开** UI（默认 `http://127.0.0.1:7799/`）；它是常驻后台进程，再次运行只会打开已在跑的那个实例的 UI，不会重复启动。
 

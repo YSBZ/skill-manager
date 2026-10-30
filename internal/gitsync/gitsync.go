@@ -412,8 +412,13 @@ func (s *Syncer) runEnv(ctx context.Context, dir string, extraEnv []string, args
 		"GIT_TERMINAL_PROMPT=0",                // no interactive credential prompt
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes", // no interactive ssh prompt
 		"GCM_INTERACTIVE=never",                // Git Credential Manager: no popups
-		"GIT_CONFIG_NOSYSTEM=1",                // ignore /etc system config (keeps global helper)
 	)
+	// Ignore the machine-wide config by default, while allowing an explicitly
+	// selected config (including portable Git's TLS settings) to take effect.
+	// An inherited GIT_CONFIG_NOSYSTEM remains the user's explicit preference.
+	if os.Getenv("GIT_CONFIG_SYSTEM") == "" {
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1")
+	}
 	// Feed stored HTTPS credentials via our own binary as GIT_ASKPASS. Unset
 	// fields (SSH-only setups) leave git auth untouched.
 	if s.askpassExe != "" && s.centralDir != "" {

@@ -182,12 +182,12 @@ func TestClassifyPushErr(t *testing.T) {
 }
 
 func TestScrubCreds(t *testing.T) {
-	in := "fatal: unable to access 'https://alice:ghp_secrettoken123@github.com/org/repo.git/': 403"
+	in := "fatal: unable to access 'https://alice:fixture-access-token@github.com/org/repo.git/': 403"
 	out := ScrubCreds(in)
 	if got := out; got == in {
 		t.Errorf("credentials not scrubbed: %q", got)
 	}
-	for _, leak := range []string{"alice", "ghp_secrettoken123"} {
+	for _, leak := range []string{"alice", "fixture-access-token"} {
 		if containsSub(ScrubCreds(in), leak) {
 			t.Errorf("scrubbed output still contains %q: %q", leak, ScrubCreds(in))
 		}

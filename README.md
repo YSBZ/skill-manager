@@ -12,17 +12,18 @@ Core idea: links point at **live git mirrors**, and a daily `fetch` makes every 
 
 ### Desktop app (macOS / Windows)
 
-Download the package for your platform from the [**Releases** page](https://github.com/YSBZ/skill-manager/releases) — no build needed:
+Download the desktop package for your platform from [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest); no build is needed.
 
-- **macOS**: `SkillManager-desktop-macos-vX.Y.Z.zip` — unzip, then drag `SkillManager.app` into `/Applications` and launch.
+- **macOS**: download `SkillManager-desktop-macos-vX.Y.Z.dmg` (recommended) — open it and drag `SkillManager.app` onto the `Applications` shortcut in the window, then launch (installing into `/Applications` also avoids App Translocation); or use `SkillManager-desktop-macos-vX.Y.Z.zip` — unzip and drag into `/Applications`.
 - **Windows**: `SkillManager-desktop-windows-vX.Y.Z.zip` — unzip and run `SkillManager.exe` (app icon embedded, no console window on double-click).
 
-> **macOS note**: an unsigned / un-notarized binary is blocked by Gatekeeper on first launch — right-click → Open, or clear quarantine with `xattr -d com.apple.quarantine <app>`.
+> **macOS note**: the package uses local ad-hoc signing and is not Apple-notarized. Gatekeeper may block the first launch; follow macOS's Privacy & Security prompt after confirming the download. Apple documents the available steps [here](https://support.apple.com/en-us/102445).
 
-> **Auto-update**: the desktop app checks GitHub for new releases and offers a one-click in-app update (download → sha256-verify → swap → relaunch). No account or token needed — releases are public.
+> **Upgrade note (v1.1.0 build 64)**: the GitLab v1.0.0 build 63 macOS app can update in-app. On Windows, download and fully extract the v1.1.0 ZIP, keeping its `runtime` folder; the old updater only replaces the executable. GitHub's previous v6.0.x releases do not carry the release code used to order this version change, so install v1.1.0 once from GitHub Releases. After moving to v1.1.0, use the update path shown by the app. See [CHANGELOG.md](CHANGELOG.md).
 
 - The central folder defaults to `~/.skillmanage` (config.yaml, manifest.yaml, the `local` managed store, lock, address, token); created automatically on first launch.
 - Manage everything from the app window; the `?` next to the title has the full guide, and the changelog lives in the version popover.
+- The desktop app includes the services it needs; open it directly—there is no terminal service to start. Git, npm's JavaScript CLI (`npm`/`npx`), and the pinned Skills CLI ship with the app. Skill actions that run Node require Node.js 22.20.0 or newer on your machine; if it is missing or too old, the app offers the official download page when you use such an action. Browsing local content, AI news, model rankings, and the reset calendar does not require Node.
 
 ## Concepts
 
@@ -40,6 +41,7 @@ Download the package for your platform from the [**Releases** page](https://gith
 ## Features
 
 - **Selective / whole-repo sync**: each tab keeps its own mapping — tick the skills to sync, or "auto-sync" a whole repo (new skills upstream get linked automatically, deletions get unlinked).
+- **Groups**: save a frequently-used set of skills as a **named group** and apply / remove it to the current directory in one click. A group is a **pure reference** — it only remembers *which* skills were selected, never copies any skill content, and the same group can be applied to any target. Two ways to build one: **"Mirror current project"** snapshots the directory's enabled set, or **"New empty group"** then pick skills from a **cross-source picker** (git repos / local sources / npx). Each source in the picker has an **"全部启用（整仓）"** toggle = whole-repo follow (`<source>/*`): on means auto-sync all of that source's skills (current and future) and individual skills can't be unchecked; off means pick skills individually. Groups are **editable** anytime — **click a group card** to open the picker, an × on each skill removes it. Applying is **additive** (other enabled skills are untouched) and "Remove from current" only disables that group. **Editing a group** (adding/removing skills) auto-syncs to every target where it was already fully applied — added skills get enabled, removed ones disabled; targets that never used the group are untouched. **Deleting a whole group** tears down its skills' links across **all targets**. For both remove/delete, skills still claimed by another group are kept. The left panel has a **Sources / Groups** segmented switch, and the source sections (git repos / npx skills / local sources) are now collapsible.
 - **Update**: scheduled daily; manually via "Sync repo" on a repo card / repo popup.
   - No local changes → just pull upstream.
   - Local changes (added / modified / deleted) → a dialog with two choices:
@@ -48,6 +50,9 @@ Download the package for your platform from the [**Releases** page](https://gith
 - **Contribute upstream**: locally added / modified / deleted skills are committed + pushed back to the git remote via "Sync repo", with an editable commit message.
 - **Secret / credential guard**: before uploading, if a secret-looking file is detected (`.env`, `*.pem`, `id_rsa`, `.npmrc`, files containing credential/secret, etc.), the dialog lists them in red and **gates the Confirm button** behind an explicit acknowledgement; the backend enforces this too (calling the API directly, bypassing the UI, is still blocked). Templates like `.env.example` don't count.
 - **Online search & install**: the top search box queries your local sources plus two online marketplaces — [skills.sh](https://skills.sh) and [skillsmp](https://skillsmp.com) — at once. Online cards are badged by origin (skills.sh ↓ downloads / skillsmp ★ stars); installing routes through `npx skills add` into the canonical `~/.agents/skills` (the **npx skills** source), so update / disable behave like any other npx skill. A gear ⚙ filters by source / sort / count; the two sources are queried in parallel and one failing never blocks the other.
+- **AI news and Skill discovery**: read AIHOT news summaries and follow source links, then search for related Skills. Discovery highlights fast-rising GitHub projects over a recent week and newly discovered projects, alongside search from skills.sh and skillsmp; these are discovery candidates, not quality certification.
+- **Model rankings and reset calendar**: browse the available model leaderboard and AIHOT reset-calendar entries. AIHOT content is cached; the displayed refresh time indicates how current the local copy is.
+- **Themes and status colors**: switch between light and dark themes. Warning and conflict states use higher-contrast colors in the light theme.
 - **Adopt / back up local skills**: move a hand-written, unmanaged skill from a sync directory into the managed store and symlink it in place, making it a cross-harness reusable source. Optionally scan plugin directories and adopt by **copy-import** (never touching the plugin originals).
 - **OS junk auto-ignored**: mirror sync writes `.DS_Store`, `._*`, `Thumbs.db`, editor swap files, `node_modules`, `__pycache__`, etc. into each mirror's `.git/info/exclude` (local ignore, never pushed upstream), so they're never mistaken for changes.
 - **Auto-sync local changes**: you may add / remove / edit local skill files outside the tool; while the app is open it silently probes a disk fingerprint **every 15s** and repaints only on a real change (idle ticks are invisible — no flicker / scroll jump), pausing while a dialog is open or the tab is hidden and probing immediately on tab / window focus. A top-right **↻ Sync local** button forces a rescan on demand.
@@ -58,7 +63,7 @@ Download the package for your platform from the [**Releases** page](https://gith
 
 Repo URLs support `https://…`, `ssh://…`, and scp-style `git@host:org/repo.git`; for safety, plaintext `http://`, local `file://`, and `ext::` (git's arbitrary-command transport) are rejected.
 
-**git must be installed and on PATH** (a red banner warns when it's missing and sync is disabled). Auto-update runs **non-interactively** in the background — with `GIT_TERMINAL_PROMPT=0`, `ssh -o BatchMode=yes`, `GCM_INTERACTIVE=never` — so it **never pops a prompt or hangs**; private repos must therefore have non-interactive auth set up in advance.
+For the **web/headless build**, git must be installed and on PATH (a red banner warns when it's missing and sync is disabled). The macOS and Windows desktop packages include portable Git. Auto-update runs **non-interactively** in the background — with `GIT_TERMINAL_PROMPT=0`, `ssh -o BatchMode=yes`, `GCM_INTERACTIVE=never` — so it **never pops a prompt or hangs**; private repos must therefore have non-interactive auth set up in advance.
 
 - **Public repos**: add via `https`, no configuration needed.
 - **Private repos · SSH (recommended)**: set up an SSH key for that git host and add it to `ssh-agent` (a passphrase-protected key must be unlocked first), with the public key registered on the server.

@@ -28,10 +28,11 @@ const updateCheckTTL = time.Hour
 
 // latestManifest is the shape of the feed's latest.json.
 type latestManifest struct {
-	Version string            `json:"version"`
-	Notes   string            `json:"notes"`
-	Assets  map[string]string `json:"assets"`
-	SHA256  map[string]string `json:"sha256"`
+	Version     string            `json:"version"`
+	ReleaseCode string            `json:"releaseCode,omitempty"`
+	Notes       string            `json:"notes"`
+	Assets      map[string]string `json:"assets"`
+	SHA256      map[string]string `json:"sha256"`
 }
 
 // handleUpdateCheck reports whether a newer release is available, per the
@@ -68,7 +69,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		"enabled":       true,
 		"current":       Version,
 		"latest":        m.Version,
-		"newer":         versionLess(Version, m.Version),
+		"newer":         releaseLess(Version, ReleaseCode, m.Version, m.ReleaseCode),
 		"notes":         m.Notes,
 		"canSelfUpdate": canSelfUpdate, // desktop on a supported OS → one-click update
 	}
@@ -116,6 +117,15 @@ func fetchLatestManifest(ctx context.Context, feed, token string) (*latestManife
 // before "5.1.10" (a string compare would get this wrong). A leading "v" is
 // ignored; non-numeric segments fall back to a lexical tiebreak.
 func versionLess(a, b string) bool { return compareVersion(a, b) < 0 }
+
+func releaseLess(currentVersion, currentCode, latestVersion, latestCode string) bool {
+	cur, curErr := strconv.ParseUint(strings.TrimSpace(currentCode), 10, 64)
+	lat, latErr := strconv.ParseUint(strings.TrimSpace(latestCode), 10, 64)
+	if curErr == nil && latErr == nil && cur > 0 && lat > 0 {
+		return cur < lat
+	}
+	return versionLess(currentVersion, latestVersion)
+}
 
 func compareVersion(a, b string) int {
 	as := strings.Split(strings.TrimPrefix(strings.TrimSpace(a), "v"), ".")

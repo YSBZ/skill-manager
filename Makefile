@@ -1,26 +1,35 @@
 BINARY := skillmanager
 DIST    := dist
 GUIDE   := docs/dist-readme.md
-# Single source of truth for the version: the macOS bundle's CFBundleShortVersionString.
-# Packaging runs on macOS, so PlistBuddy is available. Bump it in build/macos/Info.plist
-# and every artifact filename (zips + dmg) follows automatically. Defined BEFORE the
-# flag vars below so -X main.version=$(VERSION) expands to the real value (:= is immediate).
+# Single source of truth for the user-facing version and monotonic release code:
+# the macOS bundle's CFBundleShortVersionString and CFBundleVersion. Packaging runs
+# on macOS, so PlistBuddy is available. Bump them in build/macos/Info.plist and every
+# artifact filename (zips + dmg) follows automatically. Defined BEFORE the flag vars
+# below so their -X values expand to the real values (:= is immediate).
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/macos/Info.plist 2>/dev/null)
-# Company-private online-update values (feed URL + read-only token), injected at
-# build time and NEVER committed: build/update.local is gitignored. A public build
-# (file absent) leaves UPDATE_FEED/UPDATE_TOKEN empty → update check disabled, no
-# company info in the binary. See docs/plans/phase6-online-update.md.
+RELEASE_CODE := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/macos/Info.plist 2>/dev/null)
+# Company-private online-update values (mandatory feed URL + optional read-only token),
+# injected at build time and NEVER committed: build/update.local is gitignored. Leave
+# UPDATE_TOKEN empty when feed/package URLs are anonymous. A public build (file absent)
+# leaves UPDATE_FEED/UPDATE_TOKEN empty → update check disabled, no company info in the
+# binary. See docs/plans/phase6-online-update.md.
 UPDATE_FEED ?= https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json
 -include build/update.local
-UPDATE_LDFLAGS := -X main.updateFeed=$(UPDATE_FEED) -X main.updateToken=$(UPDATE_TOKEN)
+UPDATE_LDFLAGS := -X main.updateFeed=$(UPDATE_FEED) -X main.updateToken=$(UPDATE_TOKEN) -X main.releaseCode=$(RELEASE_CODE)
+FEEDBACK_LDFLAGS := -X main.feedbackEndpoint=$(FEEDBACK_ENDPOINT) -X main.feedbackToken=$(FEEDBACK_TOKEN)
+# Optional shared content service origin. Keep it empty for local-only/public builds;
+# SKILLMANAGER_CONTENT_URL can still override the baked default at runtime.
+CONTENT_SERVICE_URL ?=
+CONTENT_LDFLAGS := -X skillmanage/internal/server.ContentServiceURL=$(CONTENT_SERVICE_URL)
+PRIVATE_LDFLAGS := $(UPDATE_LDFLAGS) $(FEEDBACK_LDFLAGS) $(CONTENT_LDFLAGS)
 # main.version is stamped into the binary so `skillmanager` prints its release on startup.
-GOFLAGS := -trimpath -ldflags "-s -w -X main.version=$(VERSION) $(UPDATE_LDFLAGS)"
+GOFLAGS := -trimpath -ldflags "-s -w -X main.version=$(VERSION) $(PRIVATE_LDFLAGS)"
 # Windows: -H=windowsgui builds a windowless binary so a double-click runs the
 # daemon in the background (it auto-opens the browser) instead of leaving a
 # console window — and a quick exit no longer flashes a console.
-WINFLAGS := -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$(VERSION) $(UPDATE_LDFLAGS)"
+WINFLAGS := -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$(VERSION) $(PRIVATE_LDFLAGS)"
 
-.PHONY: build test vet fmt build-all package desktop-app desktop-win winres install-desktop desktop-dist desktop-dmg clean clean-dist
+.PHONY: build test vet fmt build-all build-contentd package desktop-app desktop-win winres install-desktop desktop-dist desktop-dmg clean clean-dist runtime-cli runtime-darwin-arm64 runtime-darwin-amd64 runtime-windows-amd64 runtime-macos runtime-windows runtime-all
 
 # go-winres lives in GOPATH/bin; winres bootstraps it if missing.
 GOWINRES := $(shell go env GOPATH)/bin/go-winres
@@ -29,9 +38,44 @@ GOWINRES := $(shell go env GOPATH)/bin/go-winres
 # the UniformTypeIdentifiers framework (which `wails build` would add for us);
 # we build both arches and lipo them into a universal SkillManager.app.
 DESKTOP_APP     := SkillManager.app
-DESKTOP_LDFLAGS := -s -w -X main.version=$(VERSION) $(UPDATE_LDFLAGS) -extldflags '-framework UniformTypeIdentifiers'
+DESKTOP_LDFLAGS := -s -w -X main.version=$(VERSION) $(PRIVATE_LDFLAGS) -extldflags '-framework UniformTypeIdentifiers'
+PYTHON          ?= python3
+RUNTIME_ROOT    := $(DIST)/system-node-runtime
+BUNDLE_RUNTIME  ?= 1
 
-desktop-app:
+ifneq ($(filter $(BUNDLE_RUNTIME),0 1),$(BUNDLE_RUNTIME))
+$(error BUNDLE_RUNTIME must be 0 or 1)
+endif
+
+ifneq ($(BUNDLE_RUNTIME),0)
+DESKTOP_MAC_RUNTIME_DEP := runtime-macos
+DESKTOP_WIN_RUNTIME_DEP := runtime-windows
+else
+DESKTOP_MAC_RUNTIME_DEP :=
+DESKTOP_WIN_RUNTIME_DEP :=
+endif
+
+# `npm ci` is local to this build helper, ignores lifecycle scripts and never
+# installs globally. The staging script downloads only lock-listed official assets.
+runtime-cli:
+	npm ci --prefix build/runtime/cli --omit=dev --ignore-scripts --registry=https://registry.npmjs.org
+
+runtime-darwin-arm64: runtime-cli
+	$(PYTHON) scripts/prepare-runtime.py --platform darwin-arm64 --output "$(RUNTIME_ROOT)"
+
+runtime-darwin-amd64: runtime-cli
+	$(PYTHON) scripts/prepare-runtime.py --platform darwin-amd64 --output "$(RUNTIME_ROOT)"
+
+runtime-windows-amd64: runtime-cli
+	$(PYTHON) scripts/prepare-runtime.py --platform windows-amd64 --output "$(RUNTIME_ROOT)"
+
+runtime-macos: runtime-darwin-arm64 runtime-darwin-amd64
+
+runtime-windows: runtime-windows-amd64
+
+runtime-all: runtime-macos runtime-windows
+
+desktop-app: $(DESKTOP_MAC_RUNTIME_DEP)
 	@mkdir -p $(DIST)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -tags "desktop,production" -ldflags "$(DESKTOP_LDFLAGS)" -o $(DIST)/smd-arm64 ./desktop
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -trimpath -tags "desktop,production" -ldflags "$(DESKTOP_LDFLAGS)" -o $(DIST)/smd-amd64 ./desktop
@@ -43,8 +87,16 @@ desktop-app:
 	@cp build/macos/AppIcon.icns "$(DIST)/$(DESKTOP_APP)/Contents/Resources/AppIcon.icns"
 	@mv $(DIST)/smd-universal "$(DIST)/$(DESKTOP_APP)/Contents/MacOS/skillmanager-desktop"
 	@chmod +x "$(DIST)/$(DESKTOP_APP)/Contents/MacOS/skillmanager-desktop"
-	@codesign --force --sign - --timestamp=none "$(DIST)/$(DESKTOP_APP)/Contents/MacOS/skillmanager-desktop" 2>/dev/null || true
-	@codesign --force --sign - --timestamp=none "$(DIST)/$(DESKTOP_APP)" 2>/dev/null || true
+	@set -eu; \
+	if [ "$(BUNDLE_RUNTIME)" = "1" ]; then \
+	  mkdir -p "$(DIST)/$(DESKTOP_APP)/Contents/Resources/runtime"; \
+	  cp -R "$(RUNTIME_ROOT)/darwin-arm64" "$(DIST)/$(DESKTOP_APP)/Contents/Resources/runtime/"; \
+	  cp -R "$(RUNTIME_ROOT)/darwin-amd64" "$(DIST)/$(DESKTOP_APP)/Contents/Resources/runtime/"; \
+	  $(PYTHON) scripts/sign-macos-runtime.py "$(DIST)/$(DESKTOP_APP)/Contents/Resources/runtime"; \
+	fi
+	codesign --force --sign - --timestamp=none "$(DIST)/$(DESKTOP_APP)/Contents/MacOS/skillmanager-desktop"
+	codesign --force --sign - --timestamp=none "$(DIST)/$(DESKTOP_APP)"
+	codesign --verify --deep --strict --verbose=2 "$(DIST)/$(DESKTOP_APP)"
 	@echo "built $(DIST)/$(DESKTOP_APP)"
 
 # Regenerate the Windows resource object (desktop/rsrc_windows_amd64.syso): the
@@ -67,13 +119,15 @@ winres:
 # any host (macOS/Linux). -H=windowsgui = no console window on double-click.
 # Depends on winres so the .exe always carries the icon + current version.
 # Output: a shareable zip with the .exe + a Windows usage guide.
-desktop-win: winres
+desktop-win: winres $(DESKTOP_WIN_RUNTIME_DEP)
 	@mkdir -p "$(DIST)/pkg"
-	@rm -f $(DIST)/pkg/SkillManager-desktop-windows-*.zip $(DIST)/pkg/SkillManager-windows-desktop-*.zip   # 清掉新旧命名，避免并存
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -tags "desktop,production" -ldflags "-s -w -H=windowsgui -X main.version=$(VERSION) $(UPDATE_LDFLAGS)" -o "$(DIST)/SkillManager.exe" ./desktop
-	@d="$(DIST)/pkg/SkillManager-desktop-windows-v$(VERSION)"; rm -rf "$$d"; mkdir -p "$$d"; \
+	@rm -f "$(DIST)/pkg"/SkillManager-desktop-windows-*.zip "$(DIST)/pkg"/SkillManager-windows-desktop-*.zip   # 清掉新旧命名，避免并存
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -tags "desktop,production,wv2runtime.embed" -ldflags "-s -w -H=windowsgui -X main.version=$(VERSION) $(PRIVATE_LDFLAGS)" -o "$(DIST)/SkillManager.exe" ./desktop
+	@set -eu; \
+	d="$(DIST)/pkg/SkillManager-desktop-windows-v$(VERSION)"; rm -rf "$$d"; mkdir -p "$$d"; \
 	cp "$(DIST)/SkillManager.exe" "$$d/SkillManager.exe"; cp build/windows/dist-readme.md "$$d/使用说明.md"; \
-	(cd "$(DIST)/pkg" && rm -f "SkillManager-desktop-windows-v$(VERSION).zip" && zip -q -r "SkillManager-desktop-windows-v$(VERSION).zip" "SkillManager-desktop-windows-v$(VERSION)"); \
+	if [ "$(BUNDLE_RUNTIME)" = "1" ]; then mkdir -p "$$d/runtime"; cp -R "$(RUNTIME_ROOT)/windows-amd64" "$$d/runtime/"; fi; \
+	$(PYTHON) -c 'import shutil,sys;shutil.make_archive(sys.argv[1], "zip", root_dir=sys.argv[2], base_dir=sys.argv[3])' "$(DIST)/pkg/SkillManager-desktop-windows-v$(VERSION)" "$(DIST)/pkg" "SkillManager-desktop-windows-v$(VERSION)"; \
 	rm -rf "$$d" "$(DIST)/SkillManager.exe"; echo "built $(DIST)/pkg/SkillManager-desktop-windows-v$(VERSION).zip"; \
 	ls -lh "$(DIST)/pkg/SkillManager-desktop-windows-v$(VERSION).zip"
 
@@ -95,8 +149,9 @@ desktop-dmg: desktop-app
 desktop-dist: desktop-app
 	@mkdir -p "$(DIST)/pkg"
 	@rm -f $(DIST)/pkg/SkillManager-desktop-macos-*.zip $(DIST)/pkg/SkillManager-macos-*.zip   # 清掉新旧命名，避免并存
-	@d="$(DIST)/pkg/SkillManager-desktop-macos"; rm -rf "$$d"; mkdir -p "$$d"; \
-	cp -R "$(DIST)/$(DESKTOP_APP)" "$$d/"; cp build/macos/dist-readme.md "$$d/安装说明.md"; \
+	@set -eu; \
+	d="$(DIST)/pkg/SkillManager-desktop-macos"; rm -rf "$$d"; mkdir -p "$$d"; \
+	cp -R "$(DIST)/$(DESKTOP_APP)" "$$d/"; cp build/macos/dist-readme.md "$$d/README.md"; \
 	(cd "$(DIST)/pkg" && rm -f "SkillManager-desktop-macos-v$(VERSION).zip" && ditto -c -k --keepParent SkillManager-desktop-macos "SkillManager-desktop-macos-v$(VERSION).zip"); \
 	rm -rf "$$d"; ls -lh "$(DIST)/pkg/SkillManager-desktop-macos-v$(VERSION).zip"
 
@@ -112,6 +167,10 @@ install-desktop: desktop-app
 # Host build.
 build:
 	go build $(GOFLAGS) -o $(BINARY) .
+
+build-contentd:
+	mkdir -p dist
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/contentd-linux-amd64 ./cmd/contentd
 
 test:
 	go test ./...

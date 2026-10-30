@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,7 @@ import (
 	"skillmanage/internal/reconcile"
 	"skillmanage/internal/scanner"
 	"skillmanage/internal/source"
+	"skillmanage/internal/toolchain"
 )
 
 // Handler builds the full HTTP handler: token-authed /api routes plus the
@@ -35,6 +37,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/status", s.requireAuth(s.handleStatus))
+	mux.HandleFunc("GET /api/content/feed", s.requireAuth(s.handleContentFeed))
+	mux.HandleFunc("GET /api/content/entries/{id}", s.requireAuth(s.handleContentEntry))
+	mux.HandleFunc("GET /api/content/status", s.requireAuth(s.handleContentStatus))
+	mux.HandleFunc("GET /api/content/reset-calendar", s.requireAuth(s.handleContentResetCalendar))
+	mux.HandleFunc("/api/content/model-leaderboard", s.requireAuth(s.handleContentModelLeaderboard))
 	mux.HandleFunc("POST /api/repos", s.requireAuth(s.handleAddRepo))
 	mux.HandleFunc("DELETE /api/repos", s.requireAuth(s.handleRemoveRepo))
 	mux.HandleFunc("GET /api/repos/export", s.requireAuth(s.handleExportRepos))
@@ -67,6 +74,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/local-source", s.requireAuth(s.handleRemoveLocalSource))
 	mux.HandleFunc("POST /api/enabled", s.requireAuth(s.handleAddEnabled))
 	mux.HandleFunc("DELETE /api/enabled", s.requireAuth(s.handleRemoveEnabled))
+	mux.HandleFunc("POST /api/feedback", s.requireAuth(s.handleFeedback))
+	mux.HandleFunc("POST /api/focus", s.requireAuth(s.handleFocus))
 	mux.HandleFunc("GET /api/presets", s.requireAuth(s.handleListPresets))
 	mux.HandleFunc("POST /api/presets", s.requireAuth(s.handleCreatePreset))
 	mux.HandleFunc("PUT /api/presets", s.requireAuth(s.handleSetPreset))
@@ -77,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/targets", s.requireAuth(s.handleRemoveTarget))
 	mux.HandleFunc("POST /api/targets/reorder", s.requireAuth(s.handleReorderTargets))
 	mux.HandleFunc("POST /api/targets/alias", s.requireAuth(s.handleSetTargetAlias))
+	mux.HandleFunc("POST /api/repos/alias", s.requireAuth(s.handleSetRepoAlias))
 	mux.HandleFunc("GET /api/browse", s.requireAuth(s.handleBrowse))
 	mux.HandleFunc("GET /api/credentials", s.requireAuth(s.handleListCredentials))
 	mux.HandleFunc("POST /api/credentials", s.requireAuth(s.handleSetCredential))
@@ -96,6 +106,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/skillsmp/key", s.requireAuth(s.handleSkillsMpKey))
 	mux.HandleFunc("POST /api/skillssh/add", s.requireAuth(s.handleSkillsShAdd))
 	mux.HandleFunc("POST /api/skillssh/remove", s.requireAuth(s.handleSkillsShRemove))
+	mux.HandleFunc("GET /api/skillhub", s.requireAuth(s.handleListSkillHub))
+	mux.HandleFunc("GET /api/skillhub/find", s.requireAuth(s.handleSkillHubFind))
+	mux.HandleFunc("POST /api/skillhub/install", s.requireAuth(s.handleSkillHubInstall))
+	mux.HandleFunc("POST /api/skillhub/remove", s.requireAuth(s.handleSkillHubRemove))
 	mux.HandleFunc("POST /api/check-updates", s.requireAuth(s.handleCheckUpdates))
 	mux.HandleFunc("GET /api/conflicts", s.requireAuth(s.handleConflicts))
 	mux.HandleFunc("POST /api/update-now", s.requireAuth(s.handleUpdateNow))
@@ -139,28 +153,34 @@ func readJSON(r *http.Request, v any) error {
 // Version is the SkillManager release shown in the UI header (and the desktop
 // window title). Both entrypoints — the web daemon (main) and the desktop app —
 // set it from their ldflags-injected version. Defaults to "dev" for `go build`.
-var Version = "dev"
+var (
+	Version     = "dev"
+	ReleaseCode string
+)
 
 type statusResp struct {
-	FirstRun     bool                  `json:"firstRun"`
-	Version      string                `json:"version,omitempty"` // SkillManager release, shown in the header
-	Repos        []RepoStatus          `json:"repos"`
-	Enabled      []config.EnabledEntry `json:"enabled"`
-	Targets      []string              `json:"targets"`
-	Links        []config.LinkRecord   `json:"links"`
-	LastSummary  reconcile.Summary     `json:"lastSummary"`
-	GitError     string                `json:"gitError,omitempty"`     // set when git is unavailable
-	NpxAvailable bool                  `json:"npxAvailable,omitempty"` // true → UI offers one-click skills.sh update (U7)
-	ClaudeCLI    bool                  `json:"claudeCli,omitempty"`    // true → UI offers delegated plugin update (claude plugin update)
-	SkillsSh     *skillsShInfo         `json:"skillsSh,omitempty"`     // skills.sh (vercel-labs/skills) directory source, if present
-	PluginCount  int                   `json:"pluginCount,omitempty"`  // number of plugin-provided skills (read-only category)
-	LocalSources []dirSourceInfo       `json:"localSources,omitempty"` // user-registered local folder sources (each its own card)
-	OS           string                `json:"os,omitempty"`           // runtime.GOOS — lets the UI show an OS-correct npx/Node install hint
-	SkillsmpKey  bool                  `json:"skillsmpKey,omitempty"`  // true → a per-user skillsmp API key is configured (value never sent)
+	FirstRun       bool                      `json:"firstRun"`
+	Version        string                    `json:"version,omitempty"` // SkillManager release, shown in the header
+	Repos          []RepoStatus              `json:"repos"`
+	Enabled        []config.EnabledEntry     `json:"enabled"`
+	Targets        []string                  `json:"targets"`
+	Links          []config.LinkRecord       `json:"links"`
+	LastSummary    reconcile.Summary         `json:"lastSummary"`
+	GitError       string                    `json:"gitError,omitempty"`       // set when git is unavailable
+	NpxAvailable   bool                      `json:"npxAvailable,omitempty"`   // true when an installer command is available
+	NodeDependency *toolchain.NodeDependency `json:"nodeDependency,omitempty"` // startup snapshot for managed system Node
+	ClaudeCLI      bool                      `json:"claudeCli,omitempty"`      // true → UI offers delegated plugin update (claude plugin update)
+	SkillsSh       *skillsShInfo             `json:"skillsSh,omitempty"`       // skills.sh (vercel-labs/skills) directory source, if present
+	SkillHub       *skillHubInfo             `json:"skillHub,omitempty"`       // SkillHub registry source (managed store), always present
+	PluginCount    int                       `json:"pluginCount,omitempty"`    // number of plugin-provided skills (read-only category)
+	LocalSources   []dirSourceInfo           `json:"localSources,omitempty"`   // user-registered local folder sources (each its own card)
+	OS             string                    `json:"os,omitempty"`             // runtime.GOOS — lets the UI show an OS-correct npx/Node install hint
+	SkillsmpKey    bool                      `json:"skillsmpKey,omitempty"`    // true → a per-user skillsmp API key is configured (value never sent)
+	Feedback       bool                      `json:"feedback,omitempty"`       // true → 已配置意见收集出口，UI 显示反馈入口
 }
 
-// npxInstallHint returns an OS-appropriate command to install Node.js, which
-// bundles npx. Used to make "npx 不可用" errors actionable instead of a dead end.
+// npxInstallHint retains the legacy OS-specific guidance for development or v1
+// bundles that have no managed Node dependency snapshot.
 func npxInstallHint() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -172,10 +192,31 @@ func npxInstallHint() string {
 	}
 }
 
-// npxUnavailableErr builds a 412 message: how to install Node.js (which ships npx)
-// for this OS, plus the manual command to run once it's available.
-func npxUnavailableErr(manual string) string {
-	return "npx 不可用。安装 Node.js（含 npx）：" + npxInstallHint() + "。或手动运行：" + manual
+// npxUnavailableErr builds actionable 412 guidance. Managed Node installations
+// point to the fixed official download page and restart step; legacy callers keep
+// their existing OS-specific hint.
+func npxUnavailableErr(manual string, dependency *toolchain.NodeDependency) string {
+	if dependency == nil {
+		return "npx 不可用。安装 Node.js（含 npx）：" + npxInstallHint() + "。或手动运行：" + manual
+	}
+	required := dependency.RequiredVersion
+	if required == "" {
+		required = "22.20.0"
+	}
+	detail := "Node.js 不可用"
+	switch dependency.State {
+	case "missing":
+		detail = "未检测到 Node.js"
+	case "too_old":
+		if dependency.Version != "" {
+			detail = "Node.js 版本过旧（当前 " + dependency.Version + "）"
+		} else {
+			detail = "Node.js 版本过旧"
+		}
+	case "invalid":
+		detail = "无法确认 Node.js 版本"
+	}
+	return detail + "。需要 Node.js " + required + " 或更高版本。请从官方页面下载：https://nodejs.org/en/download。安装后请完全退出并重新打开 SkillManager，再重试。"
 }
 
 // dirSourceInfo describes one user-registered local directory source for the
@@ -199,17 +240,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	resp := statusResp{
-		FirstRun:     s.firstRun,
-		Version:      Version,
-		Enabled:      s.cfg.Enabled,
-		Targets:      s.cfg.Targets,
-		Links:        s.manifest.Links,
-		LastSummary:  s.lastSummary,
-		GitError:     s.gitErr,
-		NpxAvailable: s.npxPath != "",
-		ClaudeCLI:    s.claudePath != "",
-		OS:           runtime.GOOS,
-		SkillsmpKey:  s.skillsmpKey != "",
+		FirstRun:       s.firstRun,
+		Version:        Version,
+		Enabled:        s.cfg.Enabled,
+		Targets:        s.cfg.Targets,
+		Links:          s.manifest.Links,
+		LastSummary:    s.lastSummary,
+		GitError:       s.gitErr,
+		NpxAvailable:   s.npxPath != "",
+		NodeDependency: s.nodeDependency,
+		ClaudeCLI:      s.claudePath != "",
+		OS:             runtime.GOOS,
+		SkillsmpKey:    s.skillsmpKey != "",
 	}
 	// repo status in config order
 	for _, repo := range s.cfg.Repos {
@@ -229,10 +271,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Repos = append(resp.Repos, st)
 	}
+	// cosmetic per-repo display alias (derived repo name → alias); identity/selector
+	// namespace is unaffected (see config.RepoAliases).
+	for i := range resp.Repos {
+		if a := s.cfg.RepoAliases[resp.Repos[i].Name]; a != "" {
+			resp.Repos[i].Alias = a
+		}
+	}
 	// skills.sh directory source (read-only, managed by `npx skills`).
 	if skills := s.listSkillsShLocked(); len(skills) > 0 {
 		root, _ := resolveAgentsLock(effectiveDirectorySources(s.cfg.DirectorySources))
 		resp.SkillsSh = &skillsShInfo{Root: root, Count: len(skills)}
+	}
+	// SkillHub source (managed store; download-only from `npx @astron-team/skillhub`
+	// public registry). No auth/config. handleStatus already holds s.mu.
+	resp.SkillHub = &skillHubInfo{
+		Available: s.npxPath != "",
+		Root:      s.skillHubStore(),
+		Count:     len(s.listSkillHubLocked()),
 	}
 	resp.PluginCount = len(listPluginSkills()) // plugin-provided skills (read-only)
 	// User-registered local folder sources (each its own card; scanned live).
@@ -243,6 +299,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.LocalSources = append(resp.LocalSources, dirSourceInfo{ID: d.ID, Label: d.Label, Path: d.Path, Count: count})
 	}
+	resp.Feedback = feedbackEnabled()
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -251,6 +308,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listSkillsShLocked() []scanner.Skill {
 	dirSources := effectiveDirectorySources(s.cfg.DirectorySources)
 	root, lock := resolveAgentsLock(dirSources)
+	root = physicalAgentsRoot(root)
 	if root == "" {
 		return nil
 	}
@@ -275,12 +333,16 @@ func (s *Server) listSkillsShLocked() []scanner.Skill {
 func (s *Server) handleListSkillsSh(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	dirSources := effectiveDirectorySources(s.cfg.DirectorySources)
+	identities, identitiesErr := readContentIdentities(s.centralDir)
 	s.mu.Unlock()
 	root, lock := resolveAgentsLock(dirSources)
+	root = physicalAgentsRoot(root)
 	type skillsShItem struct {
 		scanner.Skill
-		Source    string `json:"source,omitempty"`    // "owner/repo" from the lockfile
-		SourceURL string `json:"sourceUrl,omitempty"` // validated http(s) URL (XSS-safe)
+		Source          string                  `json:"source,omitempty"`    // "owner/repo" from the lockfile
+		SourceURL       string                  `json:"sourceUrl,omitempty"` // validated http(s) URL (XSS-safe)
+		IdentityStatus  string                  `json:"identityStatus"`
+		ContentIdentity *contentInstallIdentity `json:"contentIdentity,omitempty"`
 	}
 	out := []skillsShItem{}
 	if root != "" {
@@ -293,11 +355,52 @@ func (s *Server) handleListSkillsSh(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					continue
 				}
-				out = append(out, skillsShItem{Skill: sk, Source: e.Source, SourceURL: validHTTPURL(e.SourceURL)})
+				item := skillsShItem{Skill: sk, Source: e.Source, SourceURL: validHTTPURL(e.SourceURL), IdentityStatus: "unverified"}
+				if identitiesErr == nil {
+					current, canonicalDir, scanned := rescanCanonicalContentSkill(sk.Dir)
+					if scanned {
+						item.FrontmatterName = current.FrontmatterName
+						item.IdentityStatus = contentIdentityState(current, canonicalDir, e.Source, identities, nil)
+						if item.IdentityStatus == "exact" {
+							for _, identity := range identities {
+								if identity.Name == current.FrontmatterName && identity.CanonicalDir == canonicalDir && strings.EqualFold(identity.SourceRepo, e.Source) {
+									matched := identity
+									item.ContentIdentity = &matched
+									break
+								}
+							}
+						}
+					}
+				}
+				out = append(out, item)
 			}
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// rescanCanonicalContentSkill verifies frontmatter from the physical directory
+// rather than trusting the directory-source entry or a previously saved record.
+func rescanCanonicalContentSkill(skillDir string) (scanner.Skill, string, bool) {
+	canonicalDir, err := filepath.EvalSymlinks(skillDir)
+	if err != nil {
+		return scanner.Skill{}, "", false
+	}
+	canonicalDir, err = filepath.Abs(canonicalDir)
+	if err != nil {
+		return scanner.Skill{}, "", false
+	}
+	canonicalDir = filepath.Clean(canonicalDir)
+	current, err := scanner.Scan(canonicalDir)
+	if err != nil {
+		return scanner.Skill{}, "", false
+	}
+	for _, skill := range current {
+		if filepath.Clean(skill.Dir) == canonicalDir {
+			return skill, canonicalDir, true
+		}
+	}
+	return scanner.Skill{}, "", false
 }
 
 // handleUpdateSkillsShAll runs `npx skills update` (no skill arg) to update every
@@ -310,7 +413,7 @@ func (s *Server) handleUpdateSkillsShAll(w http.ResponseWriter, r *http.Request)
 	npx, runner := s.npxPath, s.runner
 	s.mu.Unlock()
 	if npx == "" || runner == nil {
-		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills update")})
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills update", s.nodeDependency)})
 		return
 	}
 	ctx, cancel := context.WithTimeout(s.detachedCtx(), 180*time.Second)
@@ -349,7 +452,7 @@ func (s *Server) handleUpdateSkillsShOne(w http.ResponseWriter, r *http.Request)
 	dirSources := effectiveDirectorySources(s.cfg.DirectorySources)
 	s.mu.Unlock()
 	if npx == "" || runner == nil {
-		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills update " + name)})
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills update "+name, s.nodeDependency)})
 		return
 	}
 	agentsSkillsRoot, _ := resolveAgentsLock(dirSources)
@@ -720,9 +823,10 @@ func (s *Server) handleSkillsMpKey(w http.ResponseWriter, r *http.Request) {
 // skillsAddReq is the body of POST /api/skillssh/add. Either Pkg (skills.sh form
 // owner/repo@skill) OR URL+Skill (skillsmp form: github repo root + skill name).
 type skillsAddReq struct {
-	Pkg   string `json:"pkg"`
-	URL   string `json:"url"`
-	Skill string `json:"skill"`
+	Pkg             string                 `json:"pkg"`
+	URL             string                 `json:"url"`
+	Skill           string                 `json:"skill"`
+	ContentIdentity *contentInstallRequest `json:"contentIdentity,omitempty"`
 }
 
 // handleSkillsShAdd installs a skills.sh package globally into the canonical
@@ -740,6 +844,18 @@ func (s *Server) handleSkillsShAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	if req.ContentIdentity != nil {
+		if strings.TrimSpace(req.Pkg) != "" || strings.TrimSpace(req.URL) != "" || strings.TrimSpace(req.Skill) != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content identity cannot be combined with package or URL overrides"})
+			return
+		}
+		if err := validateContentInstallRequest(*req.ContentIdentity); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		s.handleContentSkillInstall(w, *req.ContentIdentity)
+		return
+	}
 	// Two install forms: skillsmp (url + --skill name) takes precedence when url is
 	// present; otherwise the skills.sh form (pkg = owner/repo@skill).
 	useURL := strings.TrimSpace(req.URL) != ""
@@ -755,11 +871,13 @@ func (s *Server) handleSkillsShAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的 skill 包名（应形如 owner/repo@skill）"})
 		return
 	}
+	s.installMu.Lock()
+	defer s.installMu.Unlock()
 	s.mu.Lock()
 	npx, runner := s.npxPath, s.runner
 	s.mu.Unlock()
 	if npx == "" || runner == nil {
-		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills add")})
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills add", s.nodeDependency)})
 		return
 	}
 	ctx, cancel := context.WithTimeout(s.detachedCtx(), 300*time.Second)
@@ -835,17 +953,24 @@ func (s *Server) handleSkillsShRemove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid skill name"})
 		return
 	}
+	s.installMu.Lock()
+	defer s.installMu.Unlock()
 	s.mu.Lock()
 	npx, runner := s.npxPath, s.runner
 	dirSources := effectiveDirectorySources(s.cfg.DirectorySources)
 	s.mu.Unlock()
 	if npx == "" || runner == nil {
-		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills remove")})
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills remove", s.nodeDependency)})
 		return
 	}
 	agentsSkillsRoot, _ := resolveAgentsLock(dirSources)
 	if agentsSkillsRoot == "" || !isDirectChildDir(agentsSkillsRoot, name) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "不是 skills.sh 管理的 skill"})
+		return
+	}
+	proof, err := s.prepareContentRemoval(agentsSkillsRoot, name)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "content identity could not be verified before removal"})
 		return
 	}
 	// Drop our own manifest-owned links for @agents/<name> across all targets, then
@@ -882,6 +1007,12 @@ func (s *Server) handleSkillsShRemove(w http.ResponseWriter, r *http.Request) {
 	status := "removed"
 	if err != nil || !(strings.Contains(clean, "✓") || strings.Contains(clean, "Removed") || strings.Contains(clean, "removed")) {
 		status = "failed"
+	}
+	if status != "failed" {
+		if proofErr := s.retireRemovedContentIdentity(proof); proofErr != nil {
+			status = "failed"
+			err = fmt.Errorf("canonical removal could not be verified; identity proof retained: %w", proofErr)
+		}
 	}
 	ok := status != "failed"
 	resp := map[string]any{"ok": ok, "status": status, "stdout": stdout, "stderr": stderr, "removedLinks": removedLinks}
@@ -1568,11 +1699,16 @@ func (s *Server) skillsShSource(skillDir, name string) (src, url string) {
 	dirSources := effectiveDirectorySources(s.cfg.DirectorySources)
 	s.mu.Unlock()
 	root, lock := resolveAgentsLock(dirSources)
+	root = physicalAgentsRoot(root)
 	if root == "" {
 		return "", ""
 	}
 	real, err := filepath.EvalSymlinks(skillDir)
-	if err != nil || !strings.HasPrefix(real, harness.Expand(root)) {
+	if err != nil {
+		return "", ""
+	}
+	rel, err := filepath.Rel(root, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ""
 	}
 	if e, ok := lock.Has(name); ok {
@@ -1665,7 +1801,7 @@ type inventoryItem struct {
 	Managed     bool               `json:"managed"`              // owned by SkillManage (git/local)
 	Enabled     bool               `json:"enabled"`              // a managed link is materialized → enabled
 	Follow      bool               `json:"follow,omitempty"`     // enabled via a whole-source follow (source/*) → no per-item disable
-	LinkTarget  string             `json:"linkTarget,omitempty"` // for unknown links: where the symlink resolves (反查源头)
+	LinkTarget  string             `json:"linkTarget,omitempty"` // resolved source for unknown links and managed @agents verification
 	Collision   bool               `json:"collision,omitempty"`
 	// Dirty/DirtyKind flag a git-source skill with unpushed local changes
 	// (新增/修改/已提交未推送), computed live so 快捷上传 appears the moment the
@@ -1740,7 +1876,8 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	conflicts := append([]linker.Conflict(nil), s.lastSummary.Conflicts...)
 	// Whole-source follow entries (e.g. "myrepo/*", "@local/*") mapped to THIS
 	// target: items they cover cannot be disabled individually (follow is
-	// all-or-nothing), so the UI shows "跟随中" instead of a per-item toggle.
+	// all-or-nothing), so the UI shows a greyed, locked 停用 (followLockedBtn)
+	// instead of an operable per-item toggle.
 	followSrc := map[string]bool{}
 	for _, e := range s.cfg.Enabled {
 		if strings.HasSuffix(e.Skill, "/*") && harness.Expand(e.Target) == want {
@@ -1766,10 +1903,14 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 
 	// Build the classifier inputs (resolved once per request).
 	agentsSkillsRoot, lock := resolveAgentsLock(dirSourcePaths)
+	agentsSkillsRoot = physicalAgentsRoot(agentsSkillsRoot)
 	var pluginRoots, allowed []string
 	allowed = append(allowed, harness.Expand(reposRoot), harness.Expand(personalStore))
 	for _, p := range dirSourcePaths {
 		allowed = append(allowed, harness.Expand(p))
+	}
+	if agentsSkillsRoot != "" {
+		allowed = append(allowed, agentsSkillsRoot)
 	}
 	for _, t := range targets {
 		pr := harness.Expand(harness.PluginRootFor(t))
@@ -1815,6 +1956,18 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	items := make([]inventoryItem, 0, len(skills))
 	for _, sk := range skills {
 		res := clf.Classify(sk, configured)
+		// A symlink may store either the lexical ~/.agents/skills path or its
+		// resolved physical path as its target. Resolve it for the bounded
+		// skills.sh check so both forms remain attributable through a root link.
+		if res.Kind == source.KindUnknown && agentsSkillsRoot != "" {
+			if linked, ok := clf.Mgr.ResolveLink(sk.Dir); ok {
+				if canonical, err := filepath.EvalSymlinks(linked); err == nil && pathIsUnder(agentsSkillsRoot, canonical) {
+					if entry, ok := lock.Has(filepath.Base(canonical)); ok {
+						res = source.Result{Kind: source.KindSkillsSh, SourceURL: entry.SourceURL}
+					}
+				}
+			}
+		}
 		// A skills.sh skill WE linked via the @agents namespace is owned by us
 		// (manifest) — so it's managed (can be 停用'd), even though its source is
 		// skills.sh. A native skills.sh link we don't own stays read-only.
@@ -1846,6 +1999,9 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 					it.LinkTarget = real
 				}
 			}
+		}
+		if ownedAgents {
+			it.LinkTarget = canonicalAgentsMaterializationSource(clf.Mgr, &manifest, configured, sk, agentsSkillsRoot)
 		}
 		if it.Managed {
 			it.Enabled = true // present + managed ⟹ the link is live
@@ -2243,7 +2399,7 @@ func (s *Server) handleDeleteHandwritten(w http.ResponseWriter, r *http.Request)
 // reconciler's `@agents` namespace. Caller holds s.mu.
 func (s *Server) agentsRootLocked() string {
 	root, _ := resolveAgentsLock(effectiveDirectorySources(s.cfg.DirectorySources))
-	return root
+	return physicalAgentsRoot(root)
 }
 
 // dirSourceMapLocked builds the local directory-source registry (id → expanded
@@ -2296,6 +2452,146 @@ func resolveAgentsLock(dirSourcePaths []string) (agentsSkillsRoot string, lock s
 		}
 	}
 	return
+}
+
+// physicalAgentsRoot resolves a legitimate ~/.agents/skills root symlink for
+// filesystem consumers. resolveAgentsLock deliberately keeps the lexical path
+// long enough to load the sibling .skill-lock.json from ~/.agents.
+func physicalAgentsRoot(root string) string {
+	if root == "" {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return root // fresh CLI destination: keep its not-yet-created canonical path
+	}
+	if err != nil {
+		return "" // broken or unreadable mapping must not become an @agents source
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(resolved)
+}
+
+func pathIsUnder(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// canonicalAgentsMaterializationSource exports proof only when the live target
+// primitive agrees with the manifest: links resolve to the recorded canonical
+// source; copy fallbacks still match the source tree under CopyTree semantics.
+func canonicalAgentsMaterializationSource(mgr *linker.Manager, manifest *config.Manifest, target string, skill scanner.Skill, agentsRoot string) string {
+	record := mgr.FindOwned(manifest, target, skill.LinkName)
+	if record == nil {
+		return ""
+	}
+	canonicalSource, err := filepath.EvalSymlinks(record.Source)
+	if err != nil {
+		return ""
+	}
+	canonicalSource, err = filepath.Abs(canonicalSource)
+	if err != nil {
+		return ""
+	}
+	canonicalSource = filepath.Clean(canonicalSource)
+	if !pathIsUnder(agentsRoot, canonicalSource) {
+		return ""
+	}
+	switch record.LinkType {
+	case config.LinkSymlink, config.LinkJunction:
+		linked, ok := mgr.ResolveLink(skill.Dir)
+		if !ok {
+			return ""
+		}
+		canonicalTarget, err := filepath.EvalSymlinks(linked)
+		if err != nil {
+			return ""
+		}
+		canonicalTarget, err = filepath.Abs(canonicalTarget)
+		if err != nil {
+			return ""
+		}
+		canonicalTarget = filepath.Clean(canonicalTarget)
+		if canonicalTarget != canonicalSource {
+			return ""
+		}
+		return canonicalTarget
+	case config.LinkCopy:
+		if mgrCopyMatchesSource(skill.Dir, canonicalSource) {
+			return canonicalSource
+		}
+	}
+	return ""
+}
+
+// mgrCopyMatchesSource verifies the real directory against the tree produced by
+// linker.CopyTree: regular files and directories must match, and copied trees
+// do not contain symlinks. A LinkCopy record alone is not materialization proof.
+func mgrCopyMatchesSource(copyDir, sourceDir string) bool {
+	root, err := os.Lstat(copyDir)
+	if err != nil || !root.IsDir() || root.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	sourceInfo, err := os.Stat(sourceDir)
+	if err != nil || !sourceInfo.IsDir() {
+		return false
+	}
+	return copiedDirectoriesMatch(copyDir, sourceDir)
+}
+
+func copiedDirectoriesMatch(copyDir, sourceDir string) bool {
+	sourceEntries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return false
+	}
+	copyEntries, err := os.ReadDir(copyDir)
+	if err != nil {
+		return false
+	}
+	copyByName := make(map[string]os.DirEntry, len(copyEntries))
+	for _, entry := range copyEntries {
+		copyByName[entry.Name()] = entry
+	}
+	for _, sourceEntry := range sourceEntries {
+		sourceInfo, err := sourceEntry.Info()
+		if err != nil {
+			return false
+		}
+		if sourceInfo.Mode()&os.ModeSymlink != 0 {
+			continue // linker.CopyTree intentionally skips source symlinks
+		}
+		copyEntry, ok := copyByName[sourceEntry.Name()]
+		if !ok {
+			return false
+		}
+		delete(copyByName, sourceEntry.Name())
+		copyPath := filepath.Join(copyDir, sourceEntry.Name())
+		copyInfo, err := os.Lstat(copyPath)
+		if err != nil || copyInfo.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+		if sourceEntry.IsDir() {
+			if !copyInfo.IsDir() || !copiedDirectoriesMatch(copyPath, filepath.Join(sourceDir, sourceEntry.Name())) {
+				return false
+			}
+			continue
+		}
+		if !sourceInfo.Mode().IsRegular() || !copyInfo.Mode().IsRegular() || copyEntry.IsDir() {
+			return false
+		}
+		sourceBytes, err := os.ReadFile(filepath.Join(sourceDir, sourceEntry.Name()))
+		if err != nil {
+			return false
+		}
+		copyBytes, err := os.ReadFile(copyPath)
+		if err != nil || !bytes.Equal(sourceBytes, copyBytes) {
+			return false
+		}
+	}
+	return len(copyByName) == 0
 }
 
 // shadowCollides reports whether name has a cross-target shadow conflict (U3 /
@@ -2366,6 +2662,17 @@ type skillsRunner interface {
 	// SkillsRemove runs `npx skills remove <name> -g -a '*' -y` to uninstall a
 	// skills.sh skill — its canonical and every agent symlink skills.sh made.
 	SkillsRemove(ctx context.Context, npxPath, name string) (stdout, stderr string, err error)
+	// SkillHubSearch runs `npx -y @astron-team/skillhub search <query> --json`
+	// against the CLI's built-in public registry (anonymous — download-only).
+	// Caller parses the JSON.
+	SkillHubSearch(ctx context.Context, npxPath, query string) (stdout, stderr string, err error)
+	// SkillHubInstall runs `... install <slug> --dir <dir> --force --json` —
+	// installs into OUR managed store (via --dir), NOT an agent dir, so the
+	// @skillhub namespace links FROM it. The CLI owns the store copy.
+	SkillHubInstall(ctx context.Context, npxPath, slug, dir string) (stdout, stderr string, err error)
+	// SkillHubRemove runs `... remove <slug> --dir <dir> --json` to uninstall from
+	// our store; our own links are torn down separately by reconcile before this runs.
+	SkillHubRemove(ctx context.Context, npxPath, slug, dir string) (stdout, stderr string, err error)
 }
 
 // skillNameRe bounds the skill name passed to npx: a leading alnum/underscore
@@ -2491,7 +2798,7 @@ func (s *Server) handleDirSourceUpdate(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	if npx == "" || runner == nil {
-		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills update")})
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": npxUnavailableErr("npx skills update", s.nodeDependency)})
 		return
 	}
 	agentsSkillsRoot, _ := resolveAgentsLock(dirSources)
@@ -3046,6 +3353,26 @@ func adoptStatus(code string) int {
 
 // --- enabled ---
 
+// handleFocus raises the running desktop window to the foreground by invoking the
+// registered focus handler. A second launch that finds a live desktop already
+// holding the lock POSTs here (then exits), so relaunching surfaces the existing
+// window instead of the new process flashing and vanishing. No-op (still 200) when
+// no handler is registered — e.g. the headless daemon, which has no window.
+func (s *Server) handleFocus(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	fn := s.focusFn
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+	// `focused` reports whether a window was actually raised. The caller checks it
+	// (not just HTTP 200): the SPA fallback answers 200 with index.html for any
+	// unmatched route, so a version WITHOUT this endpoint would otherwise look like
+	// a success. A false here (headless daemon, or fallback HTML that won't parse)
+	// tells the caller to just exit.
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true, "focused": fn != nil})
+}
+
 func (s *Server) handleAddEnabled(w http.ResponseWriter, r *http.Request) {
 	var e config.EnabledEntry
 	if err := readJSON(r, &e); err != nil || e.Skill == "" || e.Target == "" {
@@ -3268,6 +3595,48 @@ func (s *Server) handleSetTargetAlias(w http.ResponseWriter, r *http.Request) {
 		delete(s.cfg.TargetAliases, dir)
 	} else {
 		s.cfg.TargetAliases[dir] = alias
+	}
+	if err := s.persistConfigLocked(w); err != nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSetRepoAlias sets a git repo's cosmetic display alias (derived repo name
+// → alias). An empty alias clears it (the card reverts to the derived name). The
+// selector namespace stays the derived repo name — the alias is display-only, so
+// enabled entries / presets keep working unchanged.
+func (s *Server) handleSetRepoAlias(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name  string `json:"name"`
+		Alias string `json:"alias"`
+	}
+	if err := readJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	alias := strings.TrimSpace(req.Alias)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	known := false
+	for _, rp := range s.cfg.Repos {
+		if reconcile.RepoName(rp.URL) == name {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown repo"})
+		return
+	}
+	if s.cfg.RepoAliases == nil {
+		s.cfg.RepoAliases = map[string]string{}
+	}
+	if alias == "" {
+		delete(s.cfg.RepoAliases, name)
+	} else {
+		s.cfg.RepoAliases[name] = alias
 	}
 	if err := s.persistConfigLocked(w); err != nil {
 		return

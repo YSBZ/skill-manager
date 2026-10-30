@@ -16,7 +16,7 @@ func TestCompareVersion(t *testing.T) {
 		{"5.1.10", "5.1.10", 0},
 		{"v5.1.10", "5.1.10", 0}, // leading v ignored
 		{"5.2.0", "5.1.99", 1},
-		{"5.1", "5.1.0", 0},  // missing segment treated as 0
+		{"5.1", "5.1.0", 0}, // missing segment treated as 0
 		{"5.1.0", "5.1", 0},
 		{"dev", "5.1.10", 1}, // non-numeric current sorts after → never falsely "newer"
 	}
@@ -75,6 +75,28 @@ func TestUpdateCheckNewer(t *testing.T) {
 	body := w.Body.String()
 	if !contains(body, `"newer":true`) || !contains(body, `"latest":"5.1.11"`) {
 		t.Errorf("expected newer:true latest 5.1.11, got %s", body)
+	}
+}
+
+func TestUpdateCheckUsesReleaseCodeWithoutToken(t *testing.T) {
+	Version, ReleaseCode, UpdateToken = "6.0.18", "62", ""
+	defer func() { Version, ReleaseCode, UpdateFeed, UpdateToken = "dev", "", "", "" }()
+	var gotToken string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("PRIVATE-TOKEN")
+		_, _ = w.Write([]byte(`{"version":"1.0.0","releaseCode":"63","notes":"baseline","assets":{},"sha256":{}}`))
+	}))
+	defer ts.Close()
+	UpdateFeed = ts.URL
+
+	s := newTestServer(t)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req("GET", "/api/update-check", s.token, nil))
+	if gotToken != "" {
+		t.Fatalf("PRIVATE-TOKEN = %q, want empty", gotToken)
+	}
+	if !contains(w.Body.String(), `"newer":true`) || !contains(w.Body.String(), `"latest":"1.0.0"`) {
+		t.Fatalf("expected v1.0.0 to be newer by releaseCode, got %s", w.Body.String())
 	}
 }
 

@@ -6,7 +6,9 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -119,6 +121,49 @@ func ReadKind(dir string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// RequestFocus asks the running instance (over its loopback API) to raise its
+// window to the foreground, returning true on success. Used when a second launch
+// finds a LIVE DESKTOP instance already holding the lock: instead of the new GUI
+// process exiting silently — a Dock-icon flash with no window, which reads as a
+// crash — it surfaces the existing window, matching standard single-instance
+// behavior. Best-effort and quick: if the running instance has no API listener
+// (bind failed) or does not answer promptly, the caller just exits as before.
+func RequestFocus(dir string) bool {
+	addr, err1 := os.ReadFile(config.AddressPath(dir))
+	tok, err2 := os.ReadFile(config.TokenPath(dir))
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	base := strings.TrimRight(strings.TrimSpace(string(addr)), "/")
+	if base == "" {
+		return false
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/api/focus", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	// Confirm a window was actually raised via the `focused` marker — not just a
+	// 200. A version without /api/focus answers 200 with the SPA's index.html
+	// (unmatched routes fall back to it); that HTML fails to decode → false, so we
+	// don't misreport a raise that never happened.
+	var out struct {
+		Focused bool `json:"focused"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&out) != nil {
+		return false
+	}
+	return out.Focused
 }
 
 // ReadAddressURL returns the UI URL the running instance recorded, or "".

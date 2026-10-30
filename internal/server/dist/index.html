@@ -6,7 +6,11 @@
     <!-- The daemon injects the per-install API token here at serve time (KTD11). -->
     <meta name="sm-token" content="__SM_TOKEN__" />
     <title>SkillManager</title>
+    <script src="/theme.js"></script>
     <link rel="stylesheet" href="/app.css" />
+    <link rel="stylesheet" href="/content-workspace.css" />
+    <link rel="stylesheet" href="/content-reset-calendar.css" />
+    <link rel="stylesheet" href="/content-models.css" />
   </head>
   <body>
     <header>
@@ -16,11 +20,70 @@
       </div>
       <div class="stats" id="stats"></div>
       <button id="resync-btn" class="ghost small resync-btn" title="重新扫描本地文件（各源目录 + 已链接的 skill），让工具显示与磁盘实际一致。若你在工具外直接增删了本地文件，点这个刷新。">↻ 同步本地</button>
+      <button id="reset-calendar-button" type="button" class="ghost small reset-calendar-button" aria-label="重置日历" aria-haspopup="dialog" aria-expanded="false" aria-controls="reset-calendar-popover" title="Tibo Codex 重置日历">
+        <!-- Lucide calendar-days, ISC license: https://lucide.dev/license -->
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v3M16 2v3"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></svg>
+        <span class="reset-calendar-label">重置日历</span>
+      </button>
+      <button id="theme-toggle" type="button" class="ghost small theme-toggle" aria-label="切换为暗色主题" title="切换主题">
+        <!-- Lucide sun / moon, ISC license: /lucide-LICENSE.txt -->
+        <svg class="theme-icon-light" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        <svg class="theme-icon-dark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+        <span id="theme-toggle-label" class="theme-toggle-label">亮色</span>
+      </button>
+      <button id="feedback-btn" class="ghost small hidden" title="给作者提意见 / 反馈问题（匿名）">意见反馈</button>
       <button id="update-btn" class="small hidden" title="下载并安装新版本，完成后自动重启">↑ 更新</button>
     </header>
+    <section id="reset-calendar-popover" class="reset-calendar-popover" role="dialog" aria-modal="false" aria-labelledby="reset-calendar-title" hidden></section>
 
     <div id="banner" class="banner hidden"></div>
 
+    <nav id="workspace-switcher" aria-label="工作区">
+      <button id="workspace-news" type="button" aria-current="false"><span class="content-icon content-icon-newspaper" aria-hidden="true"></span>AI 资讯</button>
+      <button id="workspace-discovery" type="button" data-skills-view="discovery" aria-current="false"><span class="content-icon content-icon-compass" aria-hidden="true"></span>发现 Skills</button>
+      <button id="workspace-manage" type="button" data-skills-view="manage" aria-current="page"><span class="content-icon content-icon-puzzle" aria-hidden="true"></span>我的技能</button>
+      <button id="return-article-control" class="workspace-return-action" type="button" hidden>返回原资讯</button>
+    </nav>
+
+    <section id="skills-workspace">
+      <section id="discovery-workspace" class="content-workspace" hidden>
+        <div id="discovery-status" class="content-status" role="status" aria-live="polite"></div>
+        <div class="content-columns discovery-columns" id="discovery-columns" data-layout="compact">
+          <section id="discovery-list" class="content-list" aria-label="Skill、Agent 与工具项目">
+            <div class="content-pane-header discovery-pane-header">
+              <nav id="discovery-view-nav" class="discovery-view-nav" aria-label="发现视图">
+                <button type="button" data-discovery-view="weekly" aria-current="page">本周飙升</button>
+                <button type="button" data-discovery-view="new" aria-current="false">新项目发现</button>
+                <button type="button" data-discovery-view="scenarios" aria-current="false">场景探索</button>
+              </nav>
+              <h1 class="content-pane-title">发现 Skill、Agent 与工具</h1>
+              <form id="discovery-search-form" class="discovery-search-form">
+                <label for="discovery-search-query">关键词
+                  <input id="discovery-search-query" type="search" maxlength="200" autocomplete="off" placeholder="搜索项目与能力" />
+                </label>
+                <button type="submit">搜索</button>
+                <button id="discovery-market-search" type="button">搜索技能市场</button>
+                <label class="discovery-scene-field" for="discovery-scene-filter">场景
+                  <select id="discovery-scene-filter" aria-label="按场景筛选">
+                    <option value="">全部场景</option>
+                    <option value="development">开发</option>
+                    <option value="design">设计</option>
+                    <option value="testing">测试</option>
+                    <option value="documentation">文档</option>
+                    <option value="agent-workflow">Agent 工作流</option>
+                  </select>
+                </label>
+              </form>
+            </div>
+            <div id="discovery-update-hint" class="content-update-hint" hidden aria-live="polite"></div>
+            <div id="discovery-meta-notices" class="content-meta-notices" aria-live="polite"></div>
+            <div id="discovery-cards" class="content-cards"></div>
+          </section>
+          <article id="discovery-detail" class="content-detail" aria-label="技能详情" aria-live="polite" hidden></article>
+        </div>
+      </section>
+
+      <section id="manage-workspace">
     <div class="layout">
       <aside>
         <div class="aside-seg">
@@ -50,6 +113,96 @@
     </div>
 
     <footer id="summary"></footer>
+      </section>
+    </section>
+
+    <section id="news-workspace" class="content-workspace" aria-label="AI 资讯" hidden>
+      <div id="news-status" class="content-status" role="status" aria-live="polite"></div>
+      <div class="content-columns news-columns">
+        <section id="news-list" class="content-list" aria-label="资讯列表">
+          <aside id="news-rail" class="news-rail" aria-label="资讯栏目">
+            <nav id="news-view-nav" class="news-view-nav" aria-label="资讯类型">
+              <button type="button" data-news-view="selected" aria-pressed="true"><span class="content-icon content-icon-zap" aria-hidden="true"></span>精选</button>
+              <button type="button" data-news-view="all" aria-pressed="false"><span class="content-icon content-icon-list" aria-hidden="true"></span>全部动态</button>
+              <button type="button" data-news-view="topic" aria-pressed="false"><span class="content-icon content-icon-flame" aria-hidden="true"></span>热点</button>
+              <button type="button" data-news-view="daily" aria-pressed="false"><span class="content-icon content-icon-newspaper" aria-hidden="true"></span>日报</button>
+              <button type="button" data-news-view="weekly" aria-pressed="false"><span class="content-icon content-icon-calendar-days" aria-hidden="true"></span>周报</button>
+              <button type="button" data-news-view="monthly" aria-pressed="false"><span class="content-icon content-icon-calendar-range" aria-hidden="true"></span>月报</button>
+            </nav>
+          </aside>
+          <div class="content-pane-header news-pane-header">
+            <div class="news-pane-heading">
+              <h1 class="content-pane-title">AI 资讯</h1>
+              <button id="news-models-button" type="button" class="ghost small news-models-trigger"><span class="content-icon content-icon-chart-no-axes-combined" aria-hidden="true"></span>模型榜</button>
+            </div>
+            <form id="news-filter-form" class="news-filter-form">
+              <label>关键词
+                <input id="news-search-query" type="search" maxlength="200" autocomplete="off" placeholder="搜索资讯与报刊" />
+              </label>
+              <label>分类
+                <select id="news-category-filter" aria-label="按分类筛选">
+                  <option value="">全部分类</option>
+                </select>
+              </label>
+              <button id="news-query-submit" type="submit">搜索</button>
+              <nav id="news-window-nav" class="news-window-nav" aria-label="资讯时间范围">
+                <button type="button" data-news-window="24h" aria-pressed="false">24 小时</button>
+                <button type="button" data-news-window="7d" aria-pressed="true">7 天</button>
+              </nav>
+            </form>
+          </div>
+          <div id="news-update-hint" class="content-update-hint" hidden aria-live="polite"></div>
+          <div id="news-meta-notices" class="content-meta-notices" aria-live="polite"></div>
+          <div id="news-cards" class="content-cards"></div>
+        </section>
+        <article id="news-detail" class="content-detail" aria-label="资讯详情" aria-live="polite"></article>
+      </div>
+      <section id="model-leaderboard" class="model-leaderboard" aria-label="模型榜" hidden>
+        <div class="model-page-heading">
+          <button id="model-back" type="button" class="ghost small">返回资讯</button>
+          <h1>模型榜</h1>
+          <p>AIHOT 第三方评测汇总</p>
+        </div>
+        <nav class="model-categories" aria-label="模型榜分类">
+          <button type="button" data-model-category="overall" aria-pressed="true">综合</button>
+          <button type="button" data-model-category="coding" aria-pressed="false">编程</button>
+          <button type="button" data-model-category="reasoning" aria-pressed="false">科研</button>
+          <button type="button" data-model-category="professional" aria-pressed="false">专业办公</button>
+          <button type="button" data-model-category="knowledge" aria-pressed="false">知识问答</button>
+        </nav>
+        <form id="model-filter-form" class="model-filter-form" role="search" aria-label="筛选当前榜单">
+          <label>模型 / 厂商<input id="model-search" type="search" maxlength="200" autocomplete="off" placeholder="搜索当前榜单" /></label>
+          <label>厂商<select id="model-provider"><option value="">全部厂商</option></select></label>
+          <button id="model-filter-reset" type="button" class="ghost small">清空筛选</button>
+        </form>
+        <div class="model-info-line">
+          <p id="model-summary" role="status">综合榜</p>
+          <p id="model-updated"></p>
+          <button id="model-original" type="button" class="ghost small">查看原榜 ↗</button>
+        </div>
+        <div id="model-status" class="model-status" role="status" hidden></div>
+        <div id="model-table-region" class="model-table-region" role="region" aria-label="模型排名，可横向滚动查看价格" tabindex="0" hidden>
+          <table class="model-table">
+            <caption>价格：人民币 / 百万 Token · 名次保留原榜</caption>
+            <thead><tr>
+              <th scope="col" aria-sort="ascending"><button type="button" data-model-sort="rank">名次<span aria-hidden="true"> ↑</span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="name">模型<span aria-hidden="true"></span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="releasedOn">上线日期<span aria-hidden="true"></span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="coveragePercent">评测覆盖<span aria-hidden="true"></span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="cachePrice">缓存价格<span aria-hidden="true"></span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="inputPrice">输入价格<span aria-hidden="true"></span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="outputPrice">输出价格<span aria-hidden="true"></span></button></th>
+              <th scope="col" aria-sort="none"><button type="button" data-model-sort="score">AIHOT 评分<span aria-hidden="true"></span></button></th>
+            </tr></thead>
+            <tbody id="model-table-body"></tbody>
+          </table>
+        </div>
+        <details id="model-source-info" class="model-source-info" hidden>
+          <summary>评分与价格说明</summary>
+          <div id="model-source-notes"></div>
+        </details>
+      </section>
+    </section>
 
     <div id="localsrc-modal" class="modal hidden">
       <div class="modal-card" style="width:min(520px,100%)">
@@ -255,6 +408,30 @@
       </div>
     </div>
 
+    <div id="feedback-modal" class="modal hidden">
+      <div class="modal-card" style="width:min(520px,100%)">
+        <div class="modal-head">
+          <h3>意见反馈</h3>
+          <button id="feedback-close" class="modal-x" title="关闭" aria-label="关闭">×</button>
+        </div>
+        <div style="padding:16px 18px">
+          <p class="muted" style="margin:0 0 10px;font-size:12.5px">匿名提交，不会带上你的用户名或机器名。可粘贴（⌘V）或选文件附截图，最多 5 张、每张 ≤5MB。</p>
+          <textarea id="feedback-text" rows="6" placeholder="写下你的意见 / 遇到的问题…（可直接 ⌘V 粘贴截图）" style="width:100%;resize:vertical"></textarea>
+          <div id="feedback-thumbs" class="fb-thumbs"></div>
+          <div class="row" style="justify-content:space-between;gap:8px;margin-top:14px">
+            <label class="ghost small" style="cursor:pointer">
+              + 添加截图
+              <input id="feedback-file" type="file" accept="image/*" multiple hidden />
+            </label>
+            <div class="row" style="gap:8px">
+              <button type="button" id="feedback-cancel" class="ghost">取消</button>
+              <button type="button" id="feedback-submit">提交</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="help-modal" class="modal hidden">
       <div class="modal-card">
         <div class="modal-head">
@@ -266,10 +443,103 @@
 
           <div class="changelog">
             <div class="changelog-head">
-              <span class="cl-ver">v6.0.7</span>
-              <span class="cl-date">同步更新内容展示 + Codex 目录识别 + 继承自上级 · 更新于 2026-07-07</span>
+              <span class="cl-ver">v1.1.0</span>
+              <span class="cl-date">正式采用语义化版本 · 更新于 2026-08-14</span>
             </div>
             <div class="changelog-scroll">
+            <div class="cl-rel">
+              <div class="cl-rel-head">v1.1.0 · 资讯、技能发现与本地一体版（2026-10-30）</div>
+              <ul>
+                <li><b>AI 资讯</b>：接入 AIHOT 精选、动态、热点与日报/周报/月报，提供来源链接和相关 Skill 搜索入口。</li>
+                <li><b>主动发现</b>：增加 GitHub 本周增长、新项目与场景探索，结合技能市场搜索和已核验的 Skill 安装入口。</li>
+                <li><b>模型与日历</b>：新增模型榜与右上角重置日历，按日期查看额度重置、发卡及来源记录。</li>
+                <li><b>亮暗主题</b>：右上角切换白底/暗色，区分标题、摘要和来源，增强亮色下冲突、错误与提醒的辨识度。</li>
+                <li><b>本地一体版</b>：双击启动，资讯服务随 App 运行；随包提供 Git、npm JavaScript CLI 和固定版 Skills CLI，使用本机 Node.js 22.20.0 或更新版本。</li>
+                <li><b>按需提示</b>：缺少合适的 Node 时，仅在相关操作提示官方下载；不影响资讯、日历、模型榜与本地浏览。精简安装包，不再携带 Node 可执行程序。</li>
+                <li><b>升级提示</b>：Windows 旧版请下载并完整解压本次 ZIP，保留 runtime 目录；GitHub 历史 v6.0.x 用户请手动下载安装一次，迁移到新的 1.x 版本体系。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v1.0.0 · 语义化版本正式基线（2026-08-14）</div>
+              <ul>
+                <li><b>版本号归一</b>：此前的 <code>v6.0.x</code> 是历史编号，现正式切换为 <code>v1.0.0</code>；今后按语义化版本演进（修复升 PATCH、兼容新增升 MINOR、破坏性变更升 MAJOR）。</li>
+                <li><b>无缝迁移</b>：客户端更新判断使用独立递增构建号，因此已安装的 <code>v6.0.18</code> 会正确把 <code>v1.0.0</code> 识别为新版本。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.18 · 匿名更新检查 + 发布构建号基线（2026-08-11）</div>
+              <ul>
+                <li><b>匿名更新检查</b>：检查更新时不再发送 token；公开更新源无需客户端内置凭据。</li>
+                <li><b>发布构建号</b>：使用递增的 release code 比较更新，为下一次 <code>v1.0.0</code> 基线做好准备。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.17 · 修复线上更新检查（2026-08-11）</div>
+              <ul>
+                <li><b>恢复自动更新检查</b>：替换已失效的只读更新源凭据，启动、窗口重新聚焦与定时检查均可正确识别后续新版本；写包权限不会随应用分发。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.16 · 整仓自动同步状态统一（2026-08-11）</div>
+              <ul>
+                <li><b>锁定态一致</b>：整仓自动同步覆盖的 skill，在搜索、源弹窗与「目录现状」中都统一显示为置灰锁定的「停用」按钮；不再出现容易误解为正在执行同步的「自动同步中」孤立标签。</li>
+                <li><b>操作指引更清楚</b>：点锁定按钮会说明该 skill 不能单独停用，并指向源弹窗中的「取消启用」操作；相关说明统一使用「真身」表述。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.15 · 仓库弹窗 skill 过滤 + 布局细节（2026-07-30）</div>
+              <ul>
+                <li><b>弹窗内 skill 过滤框</b>：仓库 / 本地源 / 目录源弹窗顶部加了过滤输入框，按<b>名称 + 描述</b>实时筛选下面的 skill（只显示/隐藏、不重建列表，输入不丢焦点）；过滤词在启用/停用/移动/删除后仍保留。</li>
+                <li><b>长路径头部省略</b>：「启用到当前目录」的长路径改为头部省略、保留尾部（<code>…/项目/.claude/skills</code>），不再挤占过滤框；完整路径悬停可见。</li>
+                <li><b>内容区最小高度</b>：过滤无命中 / 源内 skill 很少时，弹窗内容区保持约一张卡的高度，不再塌成一条。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.14 · 匿名意见反馈（2026-07-30）</div>
+              <ul>
+                <li><b>意见反馈入口</b>：头部新增「意见反馈」按钮，可写意见 + 附截图（⌘V 粘贴或选文件，最多 5 张、每张 ≤5MB）一键提交。<b>完全匿名</b>——不带你的用户名或机器名，只附带 app 版本、系统、时间。提交后作者能收到并据此改进。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.13 · 修复占锁时二次启动「闪退」（2026-07-24）</div>
+              <ul>
+                <li><b>再次启动不再「闪退」</b>：当已有一个桌面实例在运行时，再从 Dock / 访达 / 命令行启动，此前新进程会<b>静默退出</b>——Dock 图标闪一下、没有窗口出来，看着像崩溃。现改为标准单实例行为：<b>把已在运行的窗口拉到前台</b>（经本机 API 通知运行中的实例），而不是自己消失。既有的接管逻辑与「杀窗口→重开」闪烁循环防护保持不变。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.12 · 命令行（CLI）+ 分组切换即刷新 + 仓库徽章去重（2026-07-23）</div>
+              <ul>
+                <li><b>新增命令行（CLI）</b>：不用开窗口，直接 <code>skillmanager &lt;子命令&gt;</code> 驱动<b>正在运行</b>的 SkillManager 管理 skill——<code>list</code> / <code>enable</code> / <code>disable</code> / <code>move</code> / <code>adopt</code> / <code>sync</code>。走的是 App 同一套 reconcile，所以命令行改动与 GUI 的 config/manifest <b>自动保持一致</b>；供脚本或 cc/codex 钩子在 GUI 之外操作。前提：App（或守护进程）正在运行。</li>
+                <li><b>分组切换即刷新</b>：切到「分组」页会<b>重新拉取</b>分组列表——用 CLI / API 在窗口外新建的分组<b>立即可见</b>；此前读的是内存缓存，需重启才显示。</li>
+                <li><b>仓库徽章去重</b>：仓库<b>有上游更新</b>时只显示可动作的「有更新」，不再与「未更新 / 已同步」状态徽章同时出现（二者语义重叠、并列看着矛盾）。</li>
+                <li><b>CLI 健壮性</b>：① 未知子命令直接报错 + 打印用法（不再静默启动窗口、假装成功）；② <code>enable</code> 先校验该 skill 是否<b>真实存在</b>——拼错的选择器（如 <code>源/不存在的名字</code>）当场拒绝，不再写成悬空配置。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.11 · git 仓别名（2026-07-22）</div>
+              <ul>
+                <li><b>git 仓别名</b>：仓库多了区分不开时，可给每个 git 仓起一个别名。侧栏卡片点 <b>✎</b> 或<b>双击仓库名</b>就地改；别名会显示在侧栏、主面板分组头、预设分组、来源徽章与仓库弹窗标题。别名<b>纯显示</b>——selector 命名空间仍用派生仓库名，已启用的 skill 与预设不受影响。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.10 · 修复同名同源软链误报冲突（2026-07-22）</div>
+              <ul>
+                <li><b>不再误报「target occupied / foreign link」</b>：当另一工具（如 npx skills）已把某 skill 链进目标目录、而本工具又被要求把<b>同名同源</b>的 skill 链到同一位置时，识别为<b>期望状态已达成</b>——保留原链、不覆盖、不接管（never-break 不变量保持）；只有指向<b>别处</b>的外部链才算真冲突。同名重叠不再产生假冲突。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.9 · 新增 SkillHub 在线源（2026-07-21）</div>
+              <ul>
+                <li><b>SkillHub 在线源</b>：「+ 添加」搜索里，与 skills.sh / skillsmp 并列的<b>第三个在线源</b>，可直接搜索并安装 SkillHub 公共 registry 的 skill、启用到目标目录；<b>零配置、匿名可用</b>，无需 token。⚙ 来源筛选新增 SkillHub，可单独查看。</li>
+              </ul>
+            </div>
+            <div class="cl-rel">
+              <div class="cl-rel-head">v6.0.8 · 单仓同步展示更新内容 + 预设过滤框固定（2026-07-16）</div>
+              <ul>
+                <li><b>单仓「同步仓库」展示更新内容</b>：单个仓库点「同步仓库」后，也像「全量更新」那样弹面板逐条列出本次<b>新增 / 更新 / 移除</b>，不再只弹一句「已同步」；无变更时轻提示「已是最新」。</li>
+                <li><b>预设编辑过滤框固定</b>：预设编辑弹窗的「过滤 skill」输入框固定在顶部，滚动 skill 列表时不再跟着滚走。</li>
+              </ul>
+            </div>
             <div class="cl-rel">
               <div class="cl-rel-head">v6.0.7 · 同步更新内容 + Codex 目录识别修正 + 继承自上级（2026-07-07）</div>
               <ul>
@@ -866,6 +1136,7 @@ git stash pop                                             # 6 把本地改动重
               <label><input type="radio" name="onlineSrc" value="both" /> 全部</label>
               <label><input type="radio" name="onlineSrc" value="skillssh" /> skills.sh ↓</label>
               <label><input type="radio" name="onlineSrc" value="skillsmp" /> skillsmp ★</label>
+              <label><input type="radio" name="onlineSrc" value="skillhub" /> SkillHub</label>
             </div>
           </div>
           <div class="filter-group">
@@ -883,6 +1154,12 @@ git stash pop                                             # 6 把本地改动重
               <label><input type="radio" name="onlineLimit" value="10" /> 前 10</label>
               <label><input type="radio" name="onlineLimit" value="20" /> 前 20</label>
               <label><input type="radio" name="onlineLimit" value="50" /> 前 50</label>
+            </div>
+          </div>
+          <div class="filter-group">
+            <div class="filter-group-title">凭据（仅存本机）</div>
+            <div class="filter-opts">
+              <button id="of-smp-key" class="ghost small">配置 skillsmp key</button>
             </div>
           </div>
         </div>
@@ -910,7 +1187,7 @@ git stash pop                                             # 6 把本地改动重
       </div>
     </div>
 
-    <div id="modal" class="modal hidden">
+<div id="modal" class="modal hidden">
       <div class="modal-card">
         <div class="modal-head">
           <h3 id="modal-title"></h3>
@@ -926,6 +1203,13 @@ git stash pop                                             # 6 把本地改动重
 
     <div id="toast" class="toast hidden"></div>
 
+    <script src="/content-workspace.js"></script>
+    <script src="/content-ui.js"></script>
+    <script src="/content-news.js"></script>
+    <script src="/content-discovery.js"></script>
+    <script src="/node-dependency.js"></script>
     <script src="/app.js"></script>
+    <script src="/content-reset-calendar.js"></script>
+    <script src="/content-models.js"></script>
   </body>
 </html>

@@ -1,37 +1,38 @@
-# SkillManager 桌面版（Windows）
+# SkillManager v1.1.0 桌面版（Windows）
 
-跨 harness（Claude Code / Codex 等）的 skill 统一管理器。原生窗口版（不是浏览器标签）。
+原生窗口版，双击运行。压缩包包含 Git 2.56.0、npm/npx 的 JavaScript CLI 和固定版 Skills CLI；使用 Node 功能时需要本机安装 Node.js 22.20.0 或更新版本。无需手动启动服务。
 
 ## 安装
 
-1. 解压本压缩包到任意目录（如 `D:\Tools\SkillManager\`）。
-2. 双击 **SkillManager.exe** 即可——它打开一个原生窗口。
+1. 将压缩包解压到普通可写目录，例如 `D:\Tools\SkillManager\`。
+2. 双击 **SkillManager.exe**。
 
-> 放到一个**普通可写目录**（如用户目录下、D 盘某文件夹），别放 `Program Files`、也别留在压缩软件的临时解压区。一键自更新会就地覆盖这个 exe，放在需要管理员权限的位置可能更新失败。
+必须保留完整解压目录，包括 `runtime` 文件夹；不要只复制 exe。Git、npm 的 JavaScript CLI 和 Skills CLI 都在此目录中。
 
-## 首次打开（重要）
+不要把程序放到 `Program Files` 或压缩软件的临时解压目录；自更新需要写入程序目录。
 
-这个 exe 未做数字签名，**第一次运行 Windows SmartScreen 可能拦一下**：
-弹出「Windows 已保护你的电脑」时 → 点 **「更多信息」** → **「仍要运行」**。只需这一次。
+## 首次打开
 
-## 运行前提
+程序未经代码签名。首次运行时 SmartScreen 可能提示「Windows 已保护你的电脑」；请确认下载来源及文件校验值后，再选择「更多信息」→「仍要运行」。
 
-- **WebView2 运行时**：Win11 和较新的 Win10 自带。若窗口打不开（白屏/闪退），到微软官网装一个免费的 **WebView2 Evergreen Runtime** 即可。
-- **git**（拉取 git 源）；如果要用 skills.sh 在线搜索/安装，还需 **npx**（Node）。App 会自动从你的用户环境变量 PATH 里找它们；没有会在顶部红条提示，但不影响其它功能。
+## WebView2
 
-## 用起来
+WebView2 已包含在 Windows 11 中，也已安装在大多数 Windows 10 设备上。如果系统没有合适版本，SkillManager 会提示你确认，然后运行随程序内嵌的微软 Evergreen 引导程序。这个过程需要联网；无需另行下载 WebView2。安装后的 Evergreen Runtime 由微软自动更新。
 
-- 打开后是一个**窗口**：左侧是 skill 的来源（git 仓 / 本地源 / skills.sh），右侧按目标目录看现状、启用/停用。
-- 顶部「搜索」可同时搜本地 + skills.sh 线上可安装的 skill。
-- 每天 09:40 自动更新一次全部源；也可随时点右上「全量更新」。
-- 数据都在本机用户目录下的 `.skillmanage\`（即 `%USERPROFILE%\.skillmanage\`），不上传任何数据（只会向公司源检查 / 下载更新本身）。
+## 使用与数据
 
-## 升级到新版本
+- App 使用压缩包内的 Git、npm JavaScript CLI 和 Skills CLI；在线 Skill 安装等 Node 功能使用本机 Node.js 22.20.0 或更新版本。若缺少或版本过旧，相关操作会显示 Node.js 官方下载入口；安装后重新打开 App。App 不修改系统 PATH、用户 HOME 或全局软件安装。
+- 缺少合适的本机 Node.js 不影响 App 启动、资讯、日历、模型榜和本地内容查看。
+- 远端仓库、在线搜索和 Skill 安装需要网络；本地已有内容可以离线查看。私有 Git 仓继续使用你的 Git 凭据和 SSH key。
+- **本次更新**：增加 AIHOT 资讯摘要、来源和相关 Skill 搜索；发现页展示近一周增长较快的 GitHub 项目、新发现项目及技能市场搜索；加入模型榜、重置日历，以及亮暗主题和更清晰的告警/冲突颜色。发现结果是候选信息，不是质量认证。
+- 资讯、重置日历和模型榜会缓存到本机；联网使用时，以页面展示的更新时间判断缓存新旧。
+- 右上角「同步本地」重新扫描本地技能，Git 仓库也可在来源区域更新。
+- 配置与缓存保存在 `%USERPROFILE%\.skillmanage\`，不随压缩包分发。
+- App 内含运行所需服务，双击即可打开，无需手动启动服务。联网浏览不要求安装 Node；执行 Skill 安装等 Node 操作要求本机 Node.js 22.20.0 或更新版本。缺少或过旧时，仅在相关操作中提示官方下载页。
+- 从 v1.0.0 build63 升级时，旧 Windows 更新器只替换 exe，无法安装新版所需的 `runtime` 文件夹；请退出旧版、下载并完整解压 v1.1.0 build64 ZIP，保留完整目录。GitHub 旧版 v6.0.x 也不能自动识别此次跨版本号变化，请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动下载完整 ZIP 安装一次。之后使用新版应用内提示更新。
 
-- **推荐：一键自更新**。连公司网络时，有新版本会在顶部出现 **「↑ 更新到 vX.Y.Z」**，点一下即可：自动下载 → 校验 → **就地替换当前 exe** → 自动重启。**不需要你手动找文件或覆盖**。替换在「你启动 exe 时所在的目录」进行，所以别放只读/需管理员的位置。
-- **手动覆盖（离线时的兜底）**：先彻底退出——`Ctrl + Shift + Esc` 打开任务管理器 → 「详细信息」→ 结束所有 **`SkillManager.exe`** → 用新 exe 覆盖同名旧文件 → 双击运行。
+## 升级与卸载
 
-## 卸载
+手动升级时先退出 SkillManager，再用新版本压缩包中的整个文件树替换旧版本；运行时与程序版本需一起更新。
 
-退出并在任务管理器结束 `SkillManager.exe` → 删掉 exe；如不想保留配置，再删 `%USERPROFILE%\.skillmanage\`。
-工具只删它自己建立的软链，不会动你手写的真身 skill。
+卸载时退出程序并删除解压目录；如不想保留配置，再删除 `%USERPROFILE%\.skillmanage\`。

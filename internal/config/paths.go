@@ -53,3 +53,11 @@ func CredentialsPath(centralDir string) string {
 func ContribManifestPath(centralDir string) string {
 	return filepath.Join(centralDir, "contrib-manifest.yaml")
 }
+
+// SkillHubStorePath is the SkillManager-owned store the SkillHub CLI installs
+// into (via its `--dir` flag). Skills here back the `@skillhub` source namespace;
+// SkillManager links FROM here into targets but never edits the copies (the CLI
+// owns install/update/remove). Machine-local; not exported.
+func SkillHubStorePath(centralDir string) string {
+	return filepath.Join(centralDir, "skillhub")
+}

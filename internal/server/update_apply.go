@@ -61,7 +61,7 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "feed", "查询更新失败："+err.Error())
 		return
 	}
-	if !versionLess(Version, m.Version) {
+	if !releaseLess(Version, ReleaseCode, m.Version, m.ReleaseCode) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upToDate": true, "current": Version})
 		return
 	}

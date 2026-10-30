@@ -95,6 +95,130 @@ func TestSPAFallbackInjectsToken(t *testing.T) {
 	}
 }
 
+func TestContentAssetCacheBust(t *testing.T) {
+	html := []byte(`<script src="/theme.js"></script><link rel="stylesheet" href="/app.css" /><link rel="stylesheet" href="/content-workspace.css" /><link rel="stylesheet" href="/content-reset-calendar.css" /><link rel="stylesheet" href="/content-models.css" /><script src="/content-workspace.js"></script><script src="/content-ui.js"></script><script src="/content-news.js"></script><script src="/content-discovery.js"></script><script src="/node-dependency.js"></script><script src="/app.js"></script><script src="/content-reset-calendar.js"></script><script src="/content-models.js"></script>`)
+	got := string(bustAssetCache(html, "test-version"))
+	for _, asset := range []string{
+		`src="/theme.js?v=test-version"`,
+		`href="/app.css?v=test-version"`,
+		`href="/content-workspace.css?v=test-version"`,
+		`href="/content-reset-calendar.css?v=test-version"`,
+		`href="/content-models.css?v=test-version"`,
+		`src="/content-models.js?v=test-version"`,
+		`src="/content-reset-calendar.js?v=test-version"`,
+		`src="/content-workspace.js?v=test-version"`,
+		`src="/content-ui.js?v=test-version"`,
+		`src="/content-news.js?v=test-version"`,
+		`src="/content-discovery.js?v=test-version"`,
+		`src="/node-dependency.js?v=test-version"`,
+		`src="/app.js?v=test-version"`,
+	} {
+		if !strings.Contains(got, asset) {
+			t.Errorf("bustAssetCache() missing %q in %s", asset, got)
+		}
+	}
+}
+
+func TestWorkspaceShellPreservesManagementMounts(t *testing.T) {
+	s := newTestServer(t)
+	html := string(s.indexHTML)
+	for _, fragment := range []string{
+		`id="workspace-switcher"`,
+		`id="workspace-news"`,
+		`id="workspace-discovery"`,
+		`id="workspace-manage"`,
+		`data-skills-view="discovery"`,
+		`data-skills-view="manage"`,
+		`id="return-article-control"`,
+		`id="news-workspace"`,
+		`id="skills-workspace"`,
+		`id="discovery-workspace"`,
+		`id="discovery-view-nav"`,
+		`id="discovery-search-form"`,
+		`id="discovery-search-query"`,
+		`id="discovery-market-search"`,
+		`id="discovery-scene-filter"`,
+		`id="manage-workspace"`,
+		`id="news-cards"`,
+		`id="news-rail"`,
+		`id="news-view-nav"`,
+		`id="news-window-nav"`,
+		`id="discovery-cards"`,
+		`id="banner"`,
+		`id="repo-list"`,
+		`id="target-tabs"`,
+		`id="search"`,
+		`id="skills"`,
+		`id="summary"`,
+		`id="modal"`,
+		`id="localsrc-modal"`,
+		`class="layout"`,
+		`src="/content-workspace.js?v=`,
+		`src="/content-ui.js?v=`,
+		`src="/content-news.js?v=`,
+		`src="/content-discovery.js?v=`,
+		`src="/node-dependency.js?v=`,
+		`href="/content-workspace.css?v=`,
+		`href="/content-reset-calendar.css?v=`,
+		`src="/content-reset-calendar.js?v=`,
+		`id="reset-calendar-button"`,
+		`id="reset-calendar-popover"`,
+		`id="theme-toggle"`,
+		`id="news-models-button"`,
+		`id="model-leaderboard"`,
+		`src="/content-models.js?v=`,
+		`href="/content-models.css?v=`,
+		`src="/theme.js?v=`,
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("served workspace shell is missing %q", fragment)
+		}
+	}
+	if strings.Contains(html, `id="workspace-skills"`) || strings.Contains(html, `id="skills-subnav"`) {
+		t.Error("workspace shell should not include the redundant parent Skills control or second nav row")
+	}
+	navStart := strings.Index(html, `<nav id="workspace-switcher"`)
+	navEnd := -1
+	if navStart >= 0 {
+		navEnd = strings.Index(html[navStart:], `</nav>`)
+	}
+	if navStart < 0 || navEnd < 0 {
+		t.Error("workspace destinations should be inside the shared navigation row")
+	} else {
+		nav := html[navStart : navStart+navEnd]
+		if strings.Count(nav, `id="workspace-news"`) != 1 || strings.Count(nav, `data-skills-view=`) != 2 {
+			t.Error("the shared navigation row should contain News, Discovery, and management as its three destinations")
+		}
+		if !strings.Contains(nav, `id="return-article-control"`) {
+			t.Error("the article return action should stay in the shared navigation row")
+		}
+	}
+	manageStart := strings.Index(html, `<section id="manage-workspace">`)
+	layoutStart := strings.Index(html, `<div class="layout">`)
+	summaryStart := strings.Index(html, `<footer id="summary">`)
+	manageEndOffset := -1
+	if summaryStart >= 0 {
+		manageEndOffset = strings.Index(html[summaryStart:], `</section>`)
+	}
+	if manageStart < 0 || layoutStart < manageStart || summaryStart < layoutStart || manageEndOffset < 0 {
+		t.Error("management layout and summary must stay inside the management workspace")
+	}
+	contentScript := strings.Index(html, `src="/content-workspace.js?v=`)
+	sharedUIScript := strings.Index(html, `src="/content-ui.js?v=`)
+	newsRendererScript := strings.Index(html, `src="/content-news.js?v=`)
+	discoveryRendererScript := strings.Index(html, `src="/content-discovery.js?v=`)
+	nodeDependencyScript := strings.Index(html, `src="/node-dependency.js?v=`)
+	managerScript := strings.Index(html, `src="/app.js?v=`)
+	themeScript := strings.Index(html, `src="/theme.js?v=`)
+	firstStyle := strings.Index(html, `href="/app.css?v=`)
+	if themeScript < 0 || firstStyle <= themeScript {
+		t.Error("saved theme must initialize before styles to avoid a dark first paint")
+	}
+	if contentScript < 0 || sharedUIScript <= contentScript || newsRendererScript <= sharedUIScript || discoveryRendererScript <= newsRendererScript || nodeDependencyScript <= discoveryRendererScript || managerScript <= nodeDependencyScript {
+		t.Error("content lifecycle, shared UI helper, renderers, then app.js must load in order")
+	}
+}
+
 func TestAddRepoValidatesURL(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()

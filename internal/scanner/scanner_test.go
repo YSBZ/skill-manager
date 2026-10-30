@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -141,6 +142,55 @@ func TestScanParsesDescription(t *testing.T) {
 	}
 	if len(skills) != 1 || skills[0].Description != "Create structured implementation plans." {
 		t.Errorf("description not parsed: %+v", skills)
+	}
+}
+
+func TestFrontmatterNameAcrossScanModes(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "directory-name")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nname: '  metadata-name  '\ndescription: description\nversion: 1.2\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := []struct {
+		name string
+		scan func(string) ([]Skill, error)
+	}{
+		{name: "recursive", scan: Scan},
+		{name: "shallow", scan: ScanShallow},
+		{name: "inventory", scan: ScanInventory},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			skills, err := check.scan(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(skills) != 1 {
+				t.Fatalf("got %d skills, want 1", len(skills))
+			}
+			if got := skills[0].FrontmatterName; got != "metadata-name" {
+				t.Errorf("FrontmatterName = %q, want trimmed metadata-name", got)
+			}
+			data, err := json.Marshal(skills[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if got := fields["frontmatterName"]; got != "metadata-name" {
+				t.Errorf("frontmatterName = %#v, want trimmed metadata-name", got)
+			}
+			if got := fields["logicalName"]; got != "directory-name" {
+				t.Errorf("logicalName = %#v, want directory-name", got)
+			}
+		})
 	}
 }
 

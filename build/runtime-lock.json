@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "node": {
+    "version": "26.13.0",
+    "npmVersion": "11.20.0",
+    "requiredHostVersion": ">=22.20.0",
+    "payload": "npm JavaScript package only; no Node executable, headers, or Node distribution documentation",
+    "license": "MIT",
+    "source": "https://github.com/nodejs/node/archive/refs/tags/v26.13.0.tar.gz",
+    "npmSource": "https://github.com/npm/cli/archive/refs/tags/v11.20.0.tar.gz",
+    "archives": {
+      "darwin-arm64": {
+        "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz",
+        "sha256": "6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e",
+        "archive": "tar.xz"
+      },
+      "darwin-amd64": {
+        "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-x64.tar.xz",
+        "sha256": "8bd636bc981a92e1ab930c02340eece2076eb1aaf94d14e421cdeeddc1292298",
+        "archive": "tar.xz"
+      },
+      "windows-amd64": {
+        "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip",
+        "sha256": "dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b59150a",
+        "archive": "zip"
+      }
+    }
+  },
+  "git": {
+    "dugiteNativeRelease": "v2.56.0-2",
+    "dugiteNativeCommit": "a44aeca",
+    "version": "2.56.0",
+    "gitForWindowsVersion": "2.56.0.windows.4",
+    "gitLfsVersion": "3.8.1",
+    "credentialManagerVersion": "2.9.1",
+    "license": "GPL-2.0-only",
+    "minGitSourceArtifact": {
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip",
+      "sha256": "e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa877"
+    },
+    "source": "https://github.com/desktop/dugite-native/archive/refs/tags/v2.56.0-2.tar.gz",
+    "gitSourceCommit": "a018953688f1b10bddf91bff8747068f5f4746a4",
+    "gitSource": "https://github.com/git/git/archive/a018953688f1b10bddf91bff8747068f5f4746a4.tar.gz",
+    "gitForWindowsSource": "https://github.com/git-for-windows/git/archive/refs/tags/v2.56.0.windows.4.tar.gz",
+    "gitLfsSource": "https://github.com/git-lfs/git-lfs/archive/refs/tags/v3.8.1.tar.gz",
+    "credentialManagerSource": "https://github.com/git-ecosystem/git-credential-manager/archive/refs/tags/v2.9.1.tar.gz",
+    "archives": {
+      "darwin-arm64": {
+        "url": "https://github.com/desktop/dugite-native/releases/download/v2.56.0-2/dugite-native-v2.56.0-a44aeca-macOS-arm64.tar.gz",
+        "sha256": "1110de343de11cc6f469b782b60f36217b9199b5e06875dd65baa26dd60563c7",
+        "archive": "tar.gz"
+      },
+      "darwin-amd64": {
+        "url": "https://github.com/desktop/dugite-native/releases/download/v2.56.0-2/dugite-native-v2.56.0-a44aeca-macOS-x64.tar.gz",
+        "sha256": "52cc663281e1ec2f1d76ba781193ca4847e62dbbf767f6c99ec9ec5b978a7659",
+        "archive": "tar.gz"
+      },
+      "windows-amd64": {
+        "url": "https://github.com/desktop/dugite-native/releases/download/v2.56.0-2/dugite-native-v2.56.0-a44aeca-windows-x64.tar.gz",
+        "sha256": "f1e17876337d7be143e5d51976da36643d65528125cfbc14d57f171de0fd5f14",
+        "archive": "tar.gz"
+      }
+    }
+  },
+  "skills": {
+    "version": "1.7.4",
+    "license": "MIT",
+    "nodeEngine": ">=22.20.0",
+    "tarball": "https://registry.npmjs.org/skills/-/skills-1.7.4.tgz",
+    "integrity": "sha512-lHZJksE8UImNAr+LL6unqq7jERjdFw5EJasm17srycwL7rXHGdCmgu1L1ttLxUO9i3rdH+QQig+px0icHqLmRw==",
+    "source": "https://github.com/vercel-labs/skills/archive/refs/tags/v1.7.4.tar.gz"
+  },
+  "webview2": {
+    "wailsVersion": "2.12.0",
+    "strategy": "wv2runtime.embed",
+    "source": "https://github.com/wailsapp/wails/tree/v2.12.0/internal/webview2runtime"
+  }
+}

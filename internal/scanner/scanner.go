@@ -31,6 +31,9 @@ const (
 type Skill struct {
 	// LogicalName is the source directory name, preserved verbatim.
 	LogicalName string `json:"logicalName"`
+	// FrontmatterName is the SKILL.md frontmatter `name`, independent of the
+	// directory-derived LogicalName.
+	FrontmatterName string `json:"frontmatterName,omitempty"`
 	// LinkName is the filesystem-safe name used for the link (KTD3).
 	LinkName string `json:"linkName"`
 	// Dir is the absolute path to the skill directory.
@@ -51,6 +54,7 @@ type Skill struct {
 
 // frontmatter is the subset of SKILL.md YAML frontmatter the scanner reads.
 type frontmatter struct {
+	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 	// version may be authored as a string ("1.2.0") or a bare number (1.2 / 1) in
 	// YAML, so it is decoded leniently and stringified by parseFrontmatter.
@@ -61,14 +65,14 @@ type frontmatter struct {
 // frontmatter block (the YAML between a leading `---` line and the next `---`).
 // Returns empty strings when there is no frontmatter or it cannot be parsed — a
 // missing field is not an error.
-func parseFrontmatter(skillMdPath string) (description, version string) {
+func parseFrontmatter(skillMdPath string) (name, description, version string) {
 	data, err := os.ReadFile(skillMdPath)
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	trimmed := bytes.TrimLeft(data, "\ufeff \t\r\n")
 	if !bytes.HasPrefix(trimmed, []byte("---")) {
-		return "", ""
+		return "", "", ""
 	}
 	// drop the opening fence line, then split on the closing fence
 	rest := trimmed[3:]
@@ -77,13 +81,13 @@ func parseFrontmatter(skillMdPath string) (description, version string) {
 	}
 	end := bytes.Index(rest, []byte("\n---"))
 	if end < 0 {
-		return "", ""
+		return "", "", ""
 	}
 	var fm frontmatter
 	if err := yaml.Unmarshal(rest[:end], &fm); err != nil {
-		return "", ""
+		return "", "", ""
 	}
-	return fm.Description, stringifyVersion(fm.Version)
+	return strings.TrimSpace(fm.Name), fm.Description, stringifyVersion(fm.Version)
 }
 
 // stringifyVersion renders a frontmatter version (string, int, or float) as a
@@ -138,14 +142,15 @@ func Scan(repoRoot string) ([]Skill, error) {
 				return absErr
 			}
 			name := skillNameFromDir(path)
-			desc, version := parseFrontmatter(filepath.Join(path, "SKILL.md"))
+			frontmatterName, desc, version := parseFrontmatter(filepath.Join(path, "SKILL.md"))
 			skills = append(skills, Skill{
-				LogicalName: name,
-				LinkName:    pathutil.SanitizePathName(name),
-				Dir:         abs,
-				Description: desc,
-				Version:     version,
-				HasNested:   hasNestedSkillMd(path),
+				LogicalName:     name,
+				FrontmatterName: frontmatterName,
+				LinkName:        pathutil.SanitizePathName(name),
+				Dir:             abs,
+				Description:     desc,
+				Version:         version,
+				HasNested:       hasNestedSkillMd(path),
 			})
 			return filepath.SkipDir // do not descend into a skill (KTD4)
 		}
@@ -244,14 +249,15 @@ func ScanShallow(root string) ([]Skill, error) {
 			return nil, absErr
 		}
 		name := e.Name()
-		desc, version := parseFrontmatter(filepath.Join(dir, "SKILL.md"))
+		frontmatterName, desc, version := parseFrontmatter(filepath.Join(dir, "SKILL.md"))
 		skills = append(skills, Skill{
-			LogicalName: name,
-			LinkName:    pathutil.SanitizePathName(name),
-			Dir:         abs,
-			Description: desc,
-			Version:     version,
-			HasNested:   hasNestedSkillMd(dir),
+			LogicalName:     name,
+			FrontmatterName: frontmatterName,
+			LinkName:        pathutil.SanitizePathName(name),
+			Dir:             abs,
+			Description:     desc,
+			Version:         version,
+			HasNested:       hasNestedSkillMd(dir),
 		})
 	}
 	sort.Slice(skills, func(i, j int) bool { return skills[i].LinkName < skills[j].LinkName })
@@ -290,13 +296,14 @@ func ScanInventory(root string) ([]Skill, error) {
 		if absErr != nil {
 			return nil, absErr
 		}
-		desc, version := parseFrontmatter(filepath.Join(child, "SKILL.md"))
+		frontmatterName, desc, version := parseFrontmatter(filepath.Join(child, "SKILL.md"))
 		skills = append(skills, Skill{
-			LogicalName: name,
-			LinkName:    pathutil.SanitizePathName(name),
-			Dir:         abs,
-			Description: desc,
-			Version:     version,
+			LogicalName:     name,
+			FrontmatterName: frontmatterName,
+			LinkName:        pathutil.SanitizePathName(name),
+			Dir:             abs,
+			Description:     desc,
+			Version:         version,
 		})
 	}
 	sort.Slice(skills, func(i, j int) bool { return skills[i].LinkName < skills[j].LinkName })

@@ -140,6 +140,18 @@ func (mgr *Manager) Link(d DesiredLink, manifest *config.Manifest) (created bool
 			}
 			return mgr.createAndRecord(d, manifest)
 		}
+		// A foreign link that ALREADY points at our desired source is the desired
+		// end-state, reached by another tool: e.g. `npx skills` also linked the same
+		// canonical (~/.agents/skills/x) into an agent dir we were asked to link it
+		// into. Treat it as satisfied — do NOT clobber it and do NOT record it as
+		// ours (invariant ④: never destroy or claim a foreign link, so a later
+		// disable can't remove another tool's link), and do NOT raise a conflict:
+		// the skill is present at the target with the right content. If that tool
+		// later drops the link, the next reconcile finds the target empty and
+		// creates our own. Only a foreign link pointing ELSEWHERE is a real conflict.
+		if linkPointsAt(tp, d.Source) {
+			return false, nil
+		}
 		// never-break (invariant ④): a foreign link is refused, never removed.
 		return false, fmt.Errorf("%w: %s is a foreign link", ErrTargetOccupied, tp)
 

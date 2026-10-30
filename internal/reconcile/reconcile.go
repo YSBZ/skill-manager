@@ -44,6 +44,14 @@ const LocalNamespace = "@local"
 // skills.sh (invariant ④ never-break); we just point at it.
 const AgentsNamespace = "@agents"
 
+// SkillHubNamespace is the reserved selector namespace for SkillHub-registry
+// skills that the SkillHub CLI installs into our own managed store (via its
+// `--dir` flag). `@skillhub/<skill>` links the skill into a target WITHOUT
+// touching the store copy — same never-modify posture as @agents/@dir: the CLI
+// owns the store content (install/update/remove), we only create our own link
+// recorded in the manifest.
+const SkillHubNamespace = "@skillhub"
+
 // DirNamespacePrefix tags a selector that resolves to a user-registered local
 // directory source: "@dir:<id>/<skill>" (or "@dir:<id>/*" to follow). The id maps
 // to an on-disk path via the dirSources registry (SetDirSources). We link FROM
@@ -58,6 +66,7 @@ type Reconciler struct {
 	reposRoot     string
 	personalStore string
 	agentsRoot    string            // ~/.agents/skills, resolved at runtime (skills.sh source)
+	skillhubRoot  string            // SkillManager-owned SkillHub store, e.g. ~/.skillmanage/skillhub (@skillhub source)
 	dirSources    map[string]string // local directory source id → on-disk path
 	mgr           *linker.Manager
 }
@@ -72,19 +81,26 @@ func New(reposRoot, personalStore string) *Reconciler {
 // selectors resolve. Empty disables the namespace (scan returns nothing).
 func (r *Reconciler) SetAgentsRoot(root string) { r.agentsRoot = root }
 
+// SetSkillHubRoot wires the SkillManager-owned SkillHub store path so
+// `@skillhub/<skill>` selectors resolve. Empty disables the namespace.
+func (r *Reconciler) SetSkillHubRoot(root string) { r.skillhubRoot = root }
+
 // SetDirSources wires the local directory-source registry (id → on-disk path) so
 // `@dir:<id>/<skill>` selectors resolve. Replace it before each Apply.
 func (r *Reconciler) SetDirSources(m map[string]string) { r.dirSources = m }
 
 // sourceRoot resolves a selector namespace to its on-disk root: `@local` → the
-// personal store, `@agents` → the skills.sh shared dir, `@dir:<id>` → that
-// registered local folder, every other name to reposRoot/<name>.
+// personal store, `@agents` → the skills.sh shared dir, `@skillhub` → the
+// SkillHub store, `@dir:<id>` → that registered local folder, every other name
+// to reposRoot/<name>.
 func (r *Reconciler) sourceRoot(repo string) string {
 	switch repo {
 	case LocalNamespace:
 		return r.personalStore
 	case AgentsNamespace:
 		return r.agentsRoot
+	case SkillHubNamespace:
+		return r.skillhubRoot
 	}
 	if id, ok := strings.CutPrefix(repo, DirNamespacePrefix); ok {
 		return r.dirSources[id] // "" if unknown → scan yields nothing, links pruned

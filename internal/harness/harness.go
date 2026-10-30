@@ -24,6 +24,7 @@ type Harness string
 const (
 	HarnessClaudeCode Harness = "cc"
 	HarnessCodex      Harness = "codex"
+	HarnessPi         Harness = "pi"
 	// HarnessUnknown is a directory we cannot tie to a known agent by its path.
 	// It is NOT defaulted to cc — the label stays "unknown" so the user is not
 	// misled into thinking an arbitrary directory is a Claude Code dir.
@@ -31,12 +32,15 @@ const (
 )
 
 // Classify infers the consuming agent from a directory path: codex for
-// .codex/.agents skill dirs (or under $CODEX_HOME/skills), cc for .claude skill
-// dirs, otherwise unknown. cc is NOT the catch-all default.
+// .codex/.agents skill dirs (or under $CODEX_HOME/skills), pi for the global
+// <piAgentDir>/skills or a */.pi/skills dir, cc for .claude skill dirs,
+// otherwise unknown. cc is NOT the catch-all default.
 func Classify(dir string) Harness {
 	switch {
 	case IsCodexTarget(dir):
 		return HarnessCodex
+	case isPiTarget(dir):
+		return HarnessPi
 	case isCCTarget(dir):
 		return HarnessClaudeCode
 	default:
@@ -58,8 +62,9 @@ func isCCTarget(dir string) bool {
 
 // DiscoverDefaultTargets returns the conventional agent skill directories that
 // actually exist on this machine, in canonical form. It probes the default
-// install locations (Claude Code's ~/.claude/skills and Codex's
-// $CODEX_HOME|~/.codex /skills) by existence — nothing is hardcoded into config,
+// install locations (Claude Code's ~/.claude/skills, Codex's
+// $CODEX_HOME|~/.codex /skills, and pi's $PI_CODING_AGENT_DIR|~/.pi/agent
+// /skills) by existence — nothing is hardcoded into config,
 // and a location that isn't present is simply left for the user to add manually.
 func DiscoverDefaultTargets() []string {
 	var out []string
@@ -73,6 +78,13 @@ func DiscoverDefaultTargets() []string {
 			out = append(out, codexSkillsRoot()) // abs form when overridden
 		} else {
 			out = append(out, "~/.codex/skills/")
+		}
+	}
+	if dirExists(piSkillsRoot()) {
+		if os.Getenv("PI_CODING_AGENT_DIR") != "" {
+			out = append(out, piSkillsRoot()) // env 覆盖时用绝对形
+		} else {
+			out = append(out, "~/.pi/agent/skills/")
 		}
 	}
 	return out
@@ -167,8 +179,9 @@ func IsCodexTarget(dir string) bool {
 }
 
 // SkillScope is whether a skills directory is user-level (personal/global, e.g.
-// ~/.claude/skills, $CODEX_HOME/skills, ~/.agents/skills) or project-level
-// (repo-local, e.g. /work/myrepo/.claude/skills). The Agent Skills convention
+// ~/.claude/skills, $CODEX_HOME/skills, ~/.agents/skills, ~/.pi/agent/skills) or
+// project-level (repo-local, e.g. /work/myrepo/.claude/skills, /work/myrepo/.pi/skills).
+// The Agent Skills convention
 // is that project-level skills take precedence over user-level on a name clash
 // (R5.1); the inventory view uses this to label which of two same-named skills
 // actually wins (project) and which is shadowed (user). It is a DISPLAY signal —
@@ -188,6 +201,9 @@ func Scope(dir string) SkillScope {
 	if underOrEqual(r, codexSkillsRoot()) { // honors $CODEX_HOME override
 		return ScopeUser
 	}
+	if underOrEqual(r, piSkillsRoot()) { // 全局 pi ~/.pi/agent/skills（尊重 env 覆盖）
+		return ScopeUser
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, sub := range [][]string{{".claude", "skills"}, {".codex", "skills"}, {".agents", "skills"}} {
 			if underOrEqual(r, filepath.Join(append([]string{home}, sub...)...)) {
@@ -198,18 +214,19 @@ func Scope(dir string) SkillScope {
 	return ScopeProject
 }
 
-// SkillDirsFor expands a user-selected directory into the concrete Claude Code
-// and Codex skills directories it implies. Only these two agents are supported,
+// SkillDirsFor expands a user-selected directory into the concrete Claude Code,
+// Codex, and pi skills directories it implies. Only these agents are supported,
 // so their well-known subdir conventions are matched directly — the user OK'd
-// hardcoding the *pattern* (".claude/skills", ".codex/skills"), which is distinct
-// from hardcoding absolute install paths into config:
+// hardcoding the *pattern* (".claude/skills", ".codex/skills", ".pi/skills"),
+// which is distinct from hardcoding absolute install paths into config:
 //
-//	dir itself          — when the selection already is a cc/codex skills dir
+//	dir itself          — when the selection already is a cc/codex/pi skills dir
 //	dir/skills          — when dir is a .claude/.codex home (e.g. ~/.claude)
 //	dir/.claude/skills  — cc, for a project or home root (e.g. a repo checkout)
 //	dir/.agents/skills  — codex, where Codex reads PROJECT skills (preferred)
 //	dir/.codex/skills   — codex, legacy fallback (Codex doesn't read this at the
 //	                      project level; kept so existing setups still resolve)
+//	dir/.pi/skills      — pi, where pi reads PROJECT skills (CONFIG_DIR_NAME=".pi")
 //
 // It returns the existing, non-guarded candidates — at most one per harness, so
 // a project root yields exactly one cc + one codex target. .agents/skills is
@@ -224,6 +241,7 @@ func SkillDirsFor(dir string) []string {
 		filepath.Join(base, ".claude", "skills"),
 		filepath.Join(base, ".agents", "skills"),
 		filepath.Join(base, ".codex", "skills"),
+		filepath.Join(base, ".pi", "skills"),
 	}
 	var out []string
 	seenHarness := map[Harness]bool{}
@@ -239,7 +257,7 @@ func SkillDirsFor(dir string) []string {
 }
 
 // ScaffoldSkillDirs creates the missing skills/ subdirectory under any agent home
-// (.claude/.codex/.agents) that already exists at dir (when dir IS such a home) or
+// (.claude/.codex/.agents/.pi) that already exists at dir (when dir IS such a home) or
 // directly beneath it (when dir is a project root). This lets a freshly-created
 // project that has .claude but no .claude/skills be added as a sync target — we
 // fill in the conventional skills/ child rather than rejecting it or adding the
@@ -250,10 +268,10 @@ func ScaffoldSkillDirs(dir string) []string {
 	base := expand(dir)
 	var roots []string
 	switch filepath.Base(base) {
-	case ".claude", ".codex", ".agents":
+	case ".claude", ".codex", ".agents", ".pi":
 		roots = append(roots, base) // dir itself is an agent home
 	}
-	for _, name := range []string{".claude", ".codex", ".agents"} {
+	for _, name := range []string{".claude", ".codex", ".agents", ".pi"} {
 		roots = append(roots, filepath.Join(base, name)) // homes nested under a project root
 	}
 	var created []string
@@ -275,9 +293,10 @@ func ScaffoldSkillDirs(dir string) []string {
 // CreateSkillDirs scaffolds the requested harness skill dir(s) UNDER base and
 // returns them (canonical absolute). Unlike ScaffoldSkillDirs it deliberately
 // CREATES an absent agent home — the user explicitly opted in when a plain
-// folder was neither a CC nor a Codex dir. kinds are "cc" (→ base/.claude/skills)
-// and "codex" (→ base/.agents/skills, where Codex reads PROJECT skills). Unknown
-// kinds are ignored; base must not be guarded.
+// folder was neither a CC, Codex, nor pi dir. kinds are "cc" (→ base/.claude/skills),
+// "codex" (→ base/.agents/skills, where Codex reads PROJECT skills), and "pi"
+// (→ base/.pi/skills, where pi reads PROJECT skills). Unknown kinds are ignored;
+// base must not be guarded.
 func CreateSkillDirs(dir string, kinds []string) ([]string, error) {
 	base := expand(dir)
 	if Guarded(base) {
@@ -286,6 +305,7 @@ func CreateSkillDirs(dir string, kinds []string) ([]string, error) {
 	sub := map[string]string{
 		"cc":    filepath.Join(".claude", "skills"),
 		"codex": filepath.Join(".agents", "skills"), // project-level Codex skills dir
+		"pi":    filepath.Join(".pi", "skills"),
 	}
 	seen := map[string]bool{}
 	var out []string
@@ -346,6 +366,8 @@ func AncestorSkillDirs(target string) []string {
 			}
 		}
 		add(codexSkillsRoot()) // user-global Codex
+	case isPiTarget(t):
+		add(piSkillsRoot()) // 用户全局 pi；pi 项目 skill 不逐父继承（spec 点 4）
 	case Classify(t) == HarnessClaudeCode:
 		if home, err := os.UserHomeDir(); err == nil {
 			add(filepath.Join(home, ".claude", "skills")) // user-global CC
@@ -384,6 +406,33 @@ func codexHome() string {
 }
 
 func codexSkillsRoot() string { return filepath.Join(codexHome(), "skills") }
+
+// piAgentDir resolves pi's config root (~/.pi/agent), honoring PI_CODING_AGENT_DIR,
+// mirroring codexHome(). piSkillsRoot is the user-global pi skills dir it implies.
+func piAgentDir() string {
+	if h := os.Getenv("PI_CODING_AGENT_DIR"); h != "" {
+		return expand(h)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".pi", "agent")
+	}
+	return filepath.Join(".pi", "agent")
+}
+
+func piSkillsRoot() string { return filepath.Join(piAgentDir(), "skills") }
+
+// isPiTarget reports whether dir is a pi skills directory: the user-global
+// <piAgentDir>/skills (~/.pi/agent/skills), or any */.pi/skills (project-level,
+// where CONFIG_DIR_NAME=".pi"). Distinct suffixes from cc/codex/.agents, so no
+// collision. pi ALSO reads .agents/skills, but that stays Codex/npx territory —
+// SkillManager never links pi via .agents (see spec Global Constraints).
+func isPiTarget(dir string) bool {
+	r := expand(dir)
+	if underOrEqual(r, piSkillsRoot()) {
+		return true
+	}
+	return strings.HasSuffix(r, filepath.FromSlash("/.pi/skills"))
+}
 
 // expand resolves a leading "~" and returns a cleaned absolute path. Mirrors
 // reconcile.expandTarget intentionally — harness must not import reconcile.

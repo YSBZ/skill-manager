@@ -6,10 +6,12 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,10 +21,12 @@ import (
 	"time"
 
 	"skillmanage/internal/config"
+	"skillmanage/internal/contentservice"
 	"skillmanage/internal/gitsync"
 	"skillmanage/internal/harness"
 	"skillmanage/internal/reconcile"
 	"skillmanage/internal/scanner"
+	"skillmanage/internal/toolchain"
 )
 
 const tokenPlaceholder = "__SM_TOKEN__"
@@ -32,9 +36,12 @@ type RepoStatus struct {
 	URL    string `json:"url"`
 	Branch string `json:"branch,omitempty"`
 	Name   string `json:"name"`
-	State  string `json:"state"`
-	Dirty  bool   `json:"dirty,omitempty"`
-	Error  string `json:"error,omitempty"`
+	// Alias is an optional cosmetic display name (config.RepoAliases[Name]); the UI
+	// shows it instead of Name. Never affects the reconcile selector namespace.
+	Alias string `json:"alias,omitempty"`
+	State string `json:"state"`
+	Dirty bool   `json:"dirty,omitempty"`
+	Error string `json:"error,omitempty"`
 	// AuthHint is set when Error looks like a credentials/key failure, so the UI
 	// can tell the user how to fix auto-update instead of showing a raw git error.
 	AuthHint bool `json:"authHint,omitempty"`
@@ -156,14 +163,27 @@ type Server struct {
 	uiFS          fs.FS
 	indexHTML     []byte // token already injected
 
+	contentBaseURL        *url.URL
+	contentHTTPClient     *http.Client
+	contentMu             sync.Mutex
+	localContent          *contentservice.LocalRuntime
+	localContentClosed    bool
+	localContentUpstreams localContentUpstreams
+	// contentInstallHomeDir is a narrow test seam for the global skills.sh
+	// destination. Production uses os.UserHomeDir when this is nil.
+	contentInstallHomeDir func() (string, error)
+
 	syncer     *gitsync.Syncer
 	gitErr     string // non-empty when git is unavailable; syncer is then nil
 	reconciler *reconcile.Reconciler
 
-	// npxPath is the resolved `npx` executable ("" when not installed); when
-	// present the UI offers a one-click skills.sh update (U7). runner executes it
-	// (platform default; injectable in tests).
+	// npxPath is the command key used by the skills installer runner: the legacy
+	// npx executable in development/v1 bundles, or the selected system Node path
+	// in v2 bundles. Empty means Node-backed install/update is unavailable.
 	npxPath string
+	// nodeDependency is the startup snapshot from the active managed runtime.
+	// nil preserves the legacy/development behavior where npx is looked up directly.
+	nodeDependency *toolchain.NodeDependency
 	// claudePath is the resolved `claude` CLI ("" when not installed); when present
 	// the UI offers a delegated plugin update (`claude plugin update <name>`). We
 	// never take ownership of plugins (invariant ④) — this only invokes the
@@ -180,7 +200,16 @@ type Server struct {
 	// the lock is released and the git hooks dir is removed (reliability).
 	syncWG sync.WaitGroup
 
+	// focusFn, if set, raises the desktop window to the foreground. The desktop
+	// front end registers it (SetFocusHandler); a second launch that finds a live
+	// desktop already holding the lock hits POST /api/focus to invoke it, so
+	// relaunching surfaces the EXISTING window instead of the new GUI process
+	// dying silently (a Dock-icon flash with no window — looks like a crash).
+	// nil in the headless daemon (no window to raise). Guarded by mu.
+	focusFn func()
+
 	mu          sync.Mutex
+	installMu   sync.Mutex // serializes skills.sh installs, including content preflight/postflight
 	cfg         config.Config
 	manifest    config.Manifest
 	firstRun    bool
@@ -236,6 +265,15 @@ func (s *Server) syncRepoLocked(ctx context.Context, dir, url string, opts gitsy
 // SetBaseContext sets the daemon-lifetime parent context for request-detached
 // syncs. Call once before serving.
 func (s *Server) SetBaseContext(ctx context.Context) { s.baseCtx = ctx }
+
+// SetFocusHandler registers the callback that raises the desktop window to the
+// foreground (POST /api/focus invokes it). The desktop front end wires it to the
+// Wails runtime; the headless daemon never sets it. Call once before serving.
+func (s *Server) SetFocusHandler(fn func()) {
+	s.mu.Lock()
+	s.focusFn = fn
+	s.mu.Unlock()
+}
 
 // detachedCtx returns the daemon-lifetime context (or Background if unset). It
 // is detached from any HTTP request so a sync survives the request that started
@@ -368,27 +406,41 @@ func New(centralDir string) (*Server, error) {
 		// HTTPS PATs feed auto-update fetches (GIT_ASKPASS).
 		syncer.SetAskpass(exe, centralDir)
 	}
-	npxPath, _ := exec.LookPath("npx")       // "" when not installed → UI hides one-click update
+	npxPath, nodeDependency, managedInstaller := toolchain.InstallerCommand()
+	if !managedInstaller {
+		npxPath, _ = exec.LookPath("npx") // development mode preserves system npx lookup
+	}
 	claudePath, _ := exec.LookPath("claude") // "" → UI hides delegated plugin update
-	return &Server{
-		centralDir:    centralDir,
-		reposRoot:     reposRoot,
-		personalStore: personalStore,
-		token:         token,
-		uiFS:          uiFS,
-		indexHTML:     bustAssetCache(bytes.ReplaceAll(rawIndex, []byte(tokenPlaceholder), []byte(token)), token),
-		syncer:        syncer,
-		gitErr:        gitErrMsg,
-		reconciler:    reconcile.New(reposRoot, personalStore),
-		npxPath:       npxPath,
-		claudePath:    claudePath,
-		runner:        defaultSkillsRunner(),
-		skillsmpKey:   loadSkillsmpKey(centralDir),
-		cfg:           cfg,
-		manifest:      manifest,
-		firstRun:      firstRun,
-		repoStatus:    map[string]RepoStatus{},
-	}, nil
+	contentBaseURL, _ := configuredContentServiceURL()
+	s := &Server{
+		centralDir:        centralDir,
+		reposRoot:         reposRoot,
+		personalStore:     personalStore,
+		token:             token,
+		uiFS:              uiFS,
+		indexHTML:         bustAssetCache(bytes.ReplaceAll(rawIndex, []byte(tokenPlaceholder), []byte(token)), token),
+		contentBaseURL:    contentBaseURL,
+		contentHTTPClient: newContentHTTPClient(),
+		syncer:            syncer,
+		gitErr:            gitErrMsg,
+		reconciler:        reconcile.New(reposRoot, personalStore),
+		npxPath:           npxPath,
+		nodeDependency:    nodeDependency,
+		claudePath:        claudePath,
+		runner:            defaultSkillsRunner(),
+		skillsmpKey:       loadSkillsmpKey(centralDir),
+		cfg:               cfg,
+		manifest:          manifest,
+		firstRun:          firstRun,
+		repoStatus:        map[string]RepoStatus{},
+	}
+	// Wire the SkillHub store (fixed path under centralDir) so `@skillhub/<skill>`
+	// selectors resolve; ensure it exists so the CLI's `--dir` install has a home
+	// and the scanner has a dir to read.
+	skillhubStore := config.SkillHubStorePath(centralDir)
+	_ = os.MkdirAll(skillhubStore, 0o755)
+	s.reconciler.SetSkillHubRoot(skillhubStore)
+	return s, nil
 }
 
 // skillsmpKeyPath is where the user's skillsmp API key is persisted (0600).
@@ -472,10 +524,23 @@ func backfillAdoptedEnabled(cfg *config.Config, manifest *config.Manifest, perso
 
 // Close releases resources.
 func (s *Server) Close() error {
-	if s.syncer != nil {
-		return s.syncer.Close()
+	s.contentMu.Lock()
+	s.localContentClosed = true
+	localContent := s.localContent
+	s.contentMu.Unlock()
+
+	var closeErrors []error
+	if localContent != nil {
+		if err := localContent.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close local content runtime: %w", err))
+		}
 	}
-	return nil
+	if s.syncer != nil {
+		if err := s.syncer.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close git syncer: %w", err))
+		}
+	}
+	return errors.Join(closeErrors...)
 }
 
 // SyncAll mirrors every tracked repo then reconciles links. force discards
@@ -679,9 +744,21 @@ func (s *Server) spaHandler() http.HandlerFunc {
 
 // bustAssetCache appends a per-process version query to the embedded asset URLs
 // so a rebuilt/restarted daemon never serves a UI that pairs new index.html with
-// a browser-cached old app.js/app.css. The token already varies每次启动.
+// browser-cached old app.js/app.css or content workspace assets. The token
+// already varies每次启动.
 func bustAssetCache(html []byte, version string) []byte {
+	html = bytes.ReplaceAll(html, []byte(`src="/theme.js"`), []byte(`src="/theme.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`href="/app.css"`), []byte(`href="/app.css?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`href="/content-workspace.css"`), []byte(`href="/content-workspace.css?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`href="/content-reset-calendar.css"`), []byte(`href="/content-reset-calendar.css?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`href="/content-models.css"`), []byte(`href="/content-models.css?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/content-workspace.js"`), []byte(`src="/content-workspace.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/content-ui.js"`), []byte(`src="/content-ui.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/content-news.js"`), []byte(`src="/content-news.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/content-discovery.js"`), []byte(`src="/content-discovery.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/node-dependency.js"`), []byte(`src="/node-dependency.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/content-reset-calendar.js"`), []byte(`src="/content-reset-calendar.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/content-models.js"`), []byte(`src="/content-models.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`src="/app.js"`), []byte(`src="/app.js?v=`+version+`"`))
 	return html
 }

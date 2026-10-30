@@ -1,0 +1,16 @@
+Model provider marks are bundled from AIHOT public leaderboard assets.
+Used to identify the model providers; marks belong to their respective owners.
+Source page: https://aihot.news/leaderboard
+
+Anthropic: https://aihot.news/model-providers/anthropic.svg
+Google: https://aihot.news/model-providers/google.svg
+Meta: https://aihot.news/model-providers/meta.svg
+OpenAI: https://aihot.news/model-providers/openai.svg
+Moonshot AI: https://aihot.news/model-providers/moonshot.svg
+DeepSeek: https://aihot.news/model-providers/deepseek.svg
+Xiaomi: https://aihot.news/model-providers/xiaomi-mimo.svg
+Z.ai: https://aihot.news/model-providers/z-ai.svg
+xAI: https://aihot.news/model-providers/xai.svg
+Alibaba: https://aihot.news/model-providers/qianwen.svg
+StepFun: https://aihot.news/model-providers/stepfun.svg
+MiniMax: https://aihot.news/model-providers/minimax.svg

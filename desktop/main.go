@@ -15,18 +15,23 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"skillmanage/internal/askpass"
+	"skillmanage/internal/cli"
 	"skillmanage/internal/config"
 	"skillmanage/internal/daemon"
 	"skillmanage/internal/lock"
 	"skillmanage/internal/pathenv"
 	"skillmanage/internal/server"
+	"skillmanage/internal/toolchain"
 )
 
 // loopbackHost normalizes the request Host/Origin to loopback before handing off
@@ -56,12 +61,32 @@ func loopbackHost(next http.Handler) http.Handler {
 // in the window title and the in-app header. Defaults to "dev".
 var version = "dev"
 
+// appCtx holds the Wails runtime context, captured in OnStartup. The focus
+// handler (raise-window-to-front) reads it to call the runtime; it's set once at
+// startup and read later from an HTTP goroutine, so it's mutex-guarded.
+var (
+	appCtxMu sync.Mutex
+	appCtx   context.Context
+)
+
+func setAppCtx(ctx context.Context) { appCtxMu.Lock(); appCtx = ctx; appCtxMu.Unlock() }
+func getAppCtx() context.Context    { appCtxMu.Lock(); defer appCtxMu.Unlock(); return appCtx }
+
+// cliAPIPort is the preferred loopback port for the CLI-facing API listener
+// (same value the standalone daemon uses). srv.Bind falls back to an OS-assigned
+// port if it's taken, and the CLI reads the resolved address from the address file.
+const cliAPIPort = 7799
+
 // updateFeed / updateToken: company-private online-update feed + read-only token,
 // injected at build time from the gitignored build/update.local. Empty in public
 // builds → update check disabled, no company info in the binary.
 var (
 	updateFeed  = ""
 	updateToken = ""
+	releaseCode = ""
+
+	feedbackEndpoint = ""
+	feedbackToken    = ""
 )
 
 func main() {
@@ -74,6 +99,14 @@ func main() {
 	if askpass.Active() {
 		askpass.Run()
 		return
+	}
+
+	// Headless CLI mode: a bare-word first arg drives the ALREADY-RUNNING app over
+	// its loopback API (enable/disable/move/adopt/sync/list) instead of opening a
+	// window. Dash-prefixed args (Finder's -psn_…) stay on the window path; an
+	// unknown word self-reports via Run's usage error (never a silent launch).
+	if len(os.Args) > 1 && cli.IsInvocation(os.Args[1]) {
+		os.Exit(cli.Run(os.Args[1:]))
 	}
 
 	// Same PATH hardening as the daemon, so npx/git work when launched as an app.
@@ -120,7 +153,16 @@ func main() {
 		// from desktop.log (a GUI app has no console, so stderr alone is invisible).
 		log.Printf("desktop: lock 被占用 (holder pid=%d, kind=%q, alive=%v)，尝试接管", holder, kind, alive)
 		if holder > 0 && holder != os.Getpid() && alive && kind == "desktop" {
-			log.Printf("desktop: 已有桌面实例在运行 (pid=%d)，本次启动退出", holder)
+			// Don't kill the live window (that caused a kill→reopen flicker loop);
+			// instead ask it to come to the foreground, then exit. Without this the
+			// new GUI process just dies — a Dock-icon flash with no window, which
+			// the user reads as a crash ("闪退"). Best-effort: if the running
+			// instance has no API listener, we simply exit as before.
+			if daemon.RequestFocus(dir) {
+				log.Printf("desktop: 已有桌面实例在运行 (pid=%d)，已请求其前置窗口后退出", holder)
+			} else {
+				log.Printf("desktop: 已有桌面实例在运行 (pid=%d)，前置请求未成功，本次启动退出", holder)
+			}
 			os.Exit(0)
 		}
 		if lk, err = daemon.TakeOver(dir, lockPath); err != nil {
@@ -140,9 +182,14 @@ func main() {
 	daemon.WriteKind(dir, "desktop")
 	defer daemon.RemoveKind(dir)
 
+	if err := toolchain.ActivateDefault(dir); err != nil {
+		panic(fmt.Errorf("prepare bundled tools: %w", err))
+	}
 	log.Printf("desktop: lock acquired, starting server")
 	server.Version = version
+	server.ReleaseCode = releaseCode
 	server.UpdateFeed, server.UpdateToken = updateFeed, updateToken
+	server.FeedbackEndpoint, server.FeedbackToken = feedbackEndpoint, feedbackToken
 	server.IsDesktop = true // self-update targets the desktop app
 	srv, err := server.New(dir)
 	if err != nil {
@@ -152,14 +199,55 @@ func main() {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	srv.SetBaseContext(ctx)
+	if err := srv.StartLocalContent(ctx); err != nil {
+		log.Printf("desktop: content startup failed: %v", err)
+	}
+	// Raise-window handler for POST /api/focus: a second launch calls it (via
+	// daemon.RequestFocus) so relaunching a running app surfaces THIS window
+	// instead of the new process flashing and vanishing. Uses the Wails ctx
+	// captured in OnStartup; a no-op until the window exists.
+	srv.SetFocusHandler(func() {
+		if c := getAppCtx(); c != nil {
+			wruntime.WindowUnminimise(c)
+			wruntime.Show(c)
+			wruntime.WindowShow(c)
+		}
+	})
 	srv.ReconcileOnly()
 	go srv.RunScheduler(ctx)
+
+	// Loopback API listener (127.0.0.1 only), same handler the webview uses, so the
+	// `skillmanager` CLI — and cc/codex hooks / scripts — can drive the SAME live
+	// daemon over HTTP (enable/disable/move/adopt), keeping config+manifest
+	// consistent with zero GUI. Every /api/* route already requires the Bearer token
+	// (config.TokenPath, 0600) + a loopback Host, so this adds no new attack surface
+	// beyond the standalone daemon (which already binds this port). Best-effort: a
+	// bind failure disables the CLI for this run but must not block the window.
+	if ln, berr := srv.Bind(cliAPIPort); berr != nil {
+		log.Printf("desktop: CLI listener bind failed (CLI disabled this run): %v", berr)
+	} else {
+		if werr := srv.WriteAddress(ln.Addr().String()); werr != nil {
+			log.Printf("desktop: write address failed: %v", werr)
+		}
+		apiSrv := &http.Server{Handler: srv.Handler()}
+		go func() { _ = apiSrv.Serve(ln) }()
+		go func() {
+			<-ctx.Done()
+			sc, c := context.WithTimeout(context.Background(), 3*time.Second)
+			defer c()
+			_ = apiSrv.Shutdown(sc)
+		}()
+		log.Printf("desktop: CLI API listening at %s", ln.Addr().String())
+	}
 
 	log.Printf("desktop: opening window")
 	err = wails.Run(&options.App{
 		Title:  "SkillManager v" + version,
 		Width:  1180,
 		Height: 820,
+		// Capture the runtime context so POST /api/focus can raise this window
+		// when a second launch bows out (single-instance foreground behavior).
+		OnStartup: func(startupCtx context.Context) { setAppCtx(startupCtx) },
 		// The window loads the daemon's UI through its own handler — no browser,
 		// no port. Relative /api/* fetches resolve back to this same handler.
 		AssetServer: &assetserver.Options{Handler: loopbackHost(srv.Handler())},

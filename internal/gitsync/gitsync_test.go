@@ -177,6 +177,7 @@ func TestRunPassesDaemonSafeFlags(t *testing.T) {
 		t.Skip("fake-git shell script is POSIX")
 	}
 	tmp := t.TempDir()
+	t.Setenv("GIT_CONFIG_SYSTEM", "")
 	argsFile := filepath.Join(tmp, "args")
 	envFile := filepath.Join(tmp, "env")
 	fakeGit := filepath.Join(tmp, "git")
@@ -205,6 +206,32 @@ func TestRunPassesDaemonSafeFlags(t *testing.T) {
 		if !strings.Contains(string(env), want) {
 			t.Errorf("expected env to contain %q", want)
 		}
+	}
+}
+
+func TestRunHonorsExplicitSystemConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-git shell script is POSIX")
+	}
+	for _, noSystem := range []string{"", "1"} {
+		t.Run("nosystem="+noSystem, func(t *testing.T) {
+			tmp := t.TempDir()
+			configPath := filepath.Join(tmp, "portable gitconfig")
+			t.Setenv("GIT_CONFIG_SYSTEM", configPath)
+			t.Setenv("GIT_CONFIG_NOSYSTEM", noSystem)
+			fakeGit := filepath.Join(tmp, "git")
+			if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nprintf '%s\\n%s' \"$GIT_CONFIG_SYSTEM\" \"$GIT_CONFIG_NOSYSTEM\"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			s := &Syncer{git: fakeGit}
+			stdout, _, err := s.run(context.Background(), "", "version")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := configPath + "\n" + noSystem; stdout != want {
+				t.Fatalf("explicit config preference changed: got %q, want %q", stdout, want)
+			}
+		})
 	}
 }
 

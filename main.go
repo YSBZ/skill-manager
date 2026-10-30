@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,11 +18,13 @@ import (
 
 	"skillmanage/internal/askpass"
 	"skillmanage/internal/browser"
+	"skillmanage/internal/cli"
 	"skillmanage/internal/config"
 	"skillmanage/internal/daemon"
 	"skillmanage/internal/lock"
 	"skillmanage/internal/pathenv"
 	"skillmanage/internal/server"
+	"skillmanage/internal/toolchain"
 )
 
 const defaultPort = 7799
@@ -40,6 +43,10 @@ var version = "dev"
 var (
 	updateFeed  = ""
 	updateToken = ""
+	releaseCode = ""
+
+	feedbackEndpoint = ""
+	feedbackToken    = ""
 )
 
 func main() {
@@ -49,6 +56,14 @@ func main() {
 	if askpass.Active() {
 		askpass.Run()
 		return
+	}
+
+	// Headless CLI mode: a bare-word first arg drives the running daemon over its
+	// loopback API (enable/disable/move/adopt/sync/list) instead of starting one.
+	// Dash-prefixed args (-central/-no-open, Finder's -psn_…) stay on the daemon
+	// path; an unknown word self-reports via Run's usage error (never a silent boot).
+	if len(os.Args) > 1 && cli.IsInvocation(os.Args[1]) {
+		os.Exit(cli.Run(os.Args[1:]))
 	}
 
 	centralDir := flag.String("central", "", "central folder (default ~/.skillmanage)")
@@ -92,6 +107,9 @@ func run(dir string, openBrowser bool) error {
 	// Harden PATH before anything resolves git/npx: a GUI/launchd-started daemon
 	// inherits only a minimal PATH on macOS, which would hide Homebrew/nvm tools.
 	pathenv.Ensure()
+	if err := toolchain.ActivateDefault(dir); err != nil {
+		return fmt.Errorf("prepare bundled tools: %w", err)
+	}
 
 	// Single-instance guard before any sync/reconcile (KTD8).
 	lockPath := config.LockfilePath(dir)
@@ -123,7 +141,9 @@ func run(dir string, openBrowser bool) error {
 	defer daemon.RemovePid(dir)
 
 	server.Version = version
+	server.ReleaseCode = releaseCode
 	server.UpdateFeed, server.UpdateToken = updateFeed, updateToken
+	server.FeedbackEndpoint, server.FeedbackToken = feedbackEndpoint, feedbackToken
 	srv, err := server.New(dir)
 	if err != nil {
 		return err
@@ -136,6 +156,9 @@ func run(dir string, openBrowser bool) error {
 	// Request-detached syncs (update-now) parent off this context so they
 	// survive a closed browser tab but still cancel on daemon shutdown.
 	srv.SetBaseContext(ctx)
+	if err := srv.StartLocalContent(ctx); err != nil {
+		log.Printf("skillmanager: content startup failed: %v", err)
+	}
 
 	// On launch we only RECONCILE — materialize the links the current config asks
 	// for, without touching git — so existing mirrors map correctly. We do NOT pull

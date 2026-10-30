@@ -1,12 +1,13 @@
 {
-  "version": "6.0.8",
-  "notes": "同步仓库后展示本次从上游拉取的 skill 变更（新增/更新/移除），单仓与全量一致；预设编辑弹窗的过滤框固定在顶部，滚动列表时不再跟着滚走；npx skills 弹窗启用/停用后保留列表滚动位置，不跳回顶部。此前版本引入的可复用「分组（Preset）」批量启用能力亦包含在内。",
+  "version": "1.1.0",
+  "releaseCode": "64",
+  "notes": "新增 AIHOT 资讯与相关 Skill 搜索、GitHub 近周增长和新项目发现、模型榜与重置日历；增加亮暗主题和清晰的异常状态色。桌面服务随 App 启动，内含便携 Git/npm JS/Skills CLI，改用本机 Node.js >=22.20.0，仅在相关操作缺失时提示。Windows 旧版须完整解压 ZIP 保留 runtime；GitHub 历史 v6.0.x 须手动安装一次迁移至 1.x。",
   "assets": {
-    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.8/SkillManager-desktop-macos-v6.0.8.zip",
-    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v6.0.8/SkillManager-desktop-windows-v6.0.8.zip"
+    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.0/SkillManager-desktop-macos-v1.1.0.zip",
+    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.0/SkillManager-desktop-windows-v1.1.0.zip"
   },
   "sha256": {
-    "desktop-macos": "28300978af36b6d09ab5de6be67dbdae71fdc6ac073ae6f601f9e4300174659f",
-    "desktop-windows": "34b58dc5c8c0e057ac6583e6215177198450adc134d829263b9e256b5113fd38"
+    "desktop-macos": "dee9764758470b9e14a6fff3b4fe9d72d190e27556748373d011918abc9496bc",
+    "desktop-windows": "46a6657737baf57a24b85afe286892c54a79e87af7b41020c0b27d46c95f5261"
   }
 }

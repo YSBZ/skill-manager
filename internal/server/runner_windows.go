@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"skillmanage/internal/toolchain"
 )
 
-// defaultSkillsRunner on Windows routes through `cmd /c` so the npx.cmd batch
-// shim resolves, and sets HideWindow + CREATE_NO_WINDOW so the windowless
-// (-H=windowsgui) daemon does not flash a console window for the child.
+// defaultSkillsRunner preserves the legacy `cmd /c` npx.cmd path when no runtime
+// bundle is active; bundled commands use Node directly. HideWindow +
+// CREATE_NO_WINDOW keep children of the windowless app from flashing a console.
 func defaultSkillsRunner() skillsRunner { return windowsRunner{} }
 
 const createNoWindow = 0x08000000 // CREATE_NO_WINDOW
@@ -20,10 +22,10 @@ const createNoWindow = 0x08000000 // CREATE_NO_WINDOW
 type windowsRunner struct{}
 
 func (windowsRunner) UpdateSkill(ctx context.Context, npxPath, name string) (string, string, error) {
-	// npxPath is npx.cmd; reach it through cmd /c. name is allowlist-validated by
-	// the caller, so it is a safe discrete arg even via cmd.
+	// name is allowlist-validated by the caller before it reaches either the
+	// bundled Node process or the legacy cmd /c npx.cmd path.
 	// -g --yes: global scope + skip the interactive prompt (daemon has no tty).
-	cmd := exec.CommandContext(ctx, "cmd", "/c", npxPath, "skills", "update", name, "-g", "--yes")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "update", name, "-g", "--yes")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -32,9 +34,9 @@ func (windowsRunner) UpdateSkill(ctx context.Context, npxPath, name string) (str
 }
 
 // SkillsAddURL runs `npx skills add <repoURL> --skill <name> -g -y -a universal`
-// (skillsmp.com install form) via cmd /c. repoURL/skill allowlist-validated by caller.
+// (skillsmp.com install form). repoURL/skill are allowlist-validated by caller.
 func (windowsRunner) SkillsAddURL(ctx context.Context, npxPath, repoURL, skill string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "cmd", "/c", npxPath, "skills", "add", repoURL, "--skill", skill, "-g", "-y", "-a", "universal")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "add", repoURL, "--skill", skill, "-g", "-y", "-a", "universal")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -72,7 +74,7 @@ func (windowsRunner) SkillsMpFind(ctx context.Context, url, apiKey string) (stri
 
 // UpdateAll runs `npx skills update -g --yes` (no skill arg → updates everything).
 func (windowsRunner) UpdateAll(ctx context.Context, npxPath string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "cmd", "/c", npxPath, "skills", "update", "-g", "--yes")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "update", "-g", "--yes")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -111,10 +113,10 @@ func (windowsRunner) ListMarketplaces(ctx context.Context, cliPath string) (stri
 	return out.String(), errb.String(), err
 }
 
-// SkillsFind runs `npx skills find <query>` via cmd /c. query is caller-guarded
+// SkillsFind runs `npx skills find <query>`. query is caller-guarded
 // (non-empty, no leading "-").
 func (windowsRunner) SkillsFind(ctx context.Context, npxPath, query string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "cmd", "/c", npxPath, "skills", "find", query)
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "find", query)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -122,11 +124,11 @@ func (windowsRunner) SkillsFind(ctx context.Context, npxPath, query string) (str
 	return out.String(), errb.String(), err
 }
 
-// SkillsAdd runs `npx skills add <pkg> -g -y -a universal` via cmd /c — global,
+// SkillsAdd runs `npx skills add <pkg> -g -y -a universal` — global,
 // non-interactive, canonical-only (no harness symlinks; see runner_unix.go for the
 // flag rationale). pkg is caller-validated (owner/repo@skill form).
 func (windowsRunner) SkillsAdd(ctx context.Context, npxPath, pkg string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "cmd", "/c", npxPath, "skills", "add", pkg, "-g", "-y", "-a", "universal")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "add", pkg, "-g", "-y", "-a", "universal")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -134,10 +136,40 @@ func (windowsRunner) SkillsAdd(ctx context.Context, npxPath, pkg string) (string
 	return out.String(), errb.String(), err
 }
 
-// SkillsRemove runs `npx skills remove <name> -g -y` via cmd /c — no -a, which
+// SkillsRemove runs `npx skills remove <name> -g -y` — no -a, which
 // auto-targets all agents + the global canonical (verified). name caller-validated.
 func (windowsRunner) SkillsRemove(ctx context.Context, npxPath, name string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "cmd", "/c", npxPath, "skills", "remove", name, "-g", "-y")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "remove", name, "-g", "-y")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+// --- SkillHub (npx @astron-team/skillhub) ---
+// No registry/token: download-only from the CLI's built-in public registry.
+
+func (windowsRunner) SkillHubSearch(ctx context.Context, npxPath, query string) (string, string, error) {
+	cmd := toolchain.NpxCommand(ctx, npxPath, "-y", "@astron-team/skillhub", "search", query, "--json")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+func (windowsRunner) SkillHubInstall(ctx context.Context, npxPath, slug, dir string) (string, string, error) {
+	cmd := toolchain.NpxCommand(ctx, npxPath, "-y", "@astron-team/skillhub", "install", slug, "--dir", dir, "--force", "--json")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+func (windowsRunner) SkillHubRemove(ctx context.Context, npxPath, slug, dir string) (string, string, error) {
+	cmd := toolchain.NpxCommand(ctx, npxPath, "-y", "@astron-team/skillhub", "remove", slug, "--dir", dir, "--json")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

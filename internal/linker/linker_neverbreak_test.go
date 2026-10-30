@@ -45,6 +45,46 @@ func TestLinkRefusesForeignLinkWithoutClobbering(t *testing.T) {
 	}
 }
 
+// Invariant ④, satisfied-by-value: a foreign link that ALREADY points at our
+// desired source is the desired end-state, reached by another tool (e.g. `npx
+// skills` linked the same canonical ~/.agents/skills/x into the agent dir we were
+// asked to link it into). Link must treat it as satisfied — NO conflict, link
+// left untouched, and NOT recorded as ours (so a later disable can't remove
+// another tool's link). Regression for the grill-me false-positive conflict.
+func TestLinkAcceptsForeignLinkAtDesiredSource(t *testing.T) {
+	f := newFixture(t)
+	if err := os.MkdirAll(f.target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// External canonical OUTSIDE our repos/local store (stands in for ~/.agents).
+	external := filepath.Join(t.TempDir(), "agents", "skills", "grill-me")
+	if err := os.MkdirAll(external, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A foreign tool already linked that canonical into our target.
+	foreign := filepath.Join(f.target, "grill-me")
+	if err := os.Symlink(external, foreign); err != nil {
+		t.Fatal(err)
+	}
+	// We are asked to link the SAME external source into the SAME target.
+	created, err := f.mgr.Link(f.desired("grill-me", external), f.man)
+	if err != nil {
+		t.Fatalf("foreign link already at desired source must NOT conflict, got err=%v", err)
+	}
+	if created {
+		t.Fatal("desired state already present → must be a no-op, got created=true")
+	}
+	// Untouched: still a symlink, still pointing at external.
+	got, rlErr := os.Readlink(foreign)
+	if rlErr != nil || filepath.Clean(got) != filepath.Clean(external) {
+		t.Fatalf("foreign link was modified: target=%q err=%v", got, rlErr)
+	}
+	// Never claimed as ours.
+	if findRecord(f.man, f.target, "grill-me") != nil {
+		t.Fatal("a foreign link (even at our desired source) must not be recorded as ours")
+	}
+}
+
 // The looksOurs channel (KTD6(a)): an unowned link that DOES resolve under our
 // private store is adopted (removed + recreated + recorded). This locks the
 // chosen semantic so a future change cannot silently broaden or break it.

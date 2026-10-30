@@ -30,18 +30,30 @@ document.addEventListener("mouseout", (e) => {
   if (e.target.closest && e.target.closest(".skill-desc")) tip.classList.add("hidden");
 });
 
-async function api(method, path, body) {
-  const opts = { method, headers: { Authorization: "Bearer " + TOKEN } };
+async function api(method, path, body, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", "Bearer " + TOKEN);
+  const opts = { method, headers };
   if (body !== undefined) {
-    opts.headers["Content-Type"] = "application/json";
+    headers.set("Content-Type", "application/json");
     opts.body = JSON.stringify(body);
   }
   const r = await fetch(path, opts);
+  if (r.status === 304 && options.withMeta) {
+    return { status: 304, data: null, etag: r.headers.get("ETag") || "" };
+  }
   const txt = await r.text();
   let data = null;
   if (txt) { try { data = JSON.parse(txt); } catch { data = txt; } }
-  if (!r.ok) throw new Error((data && data.error) || r.statusText || "HTTP " + r.status);
-  return data;
+  if (!r.ok) {
+    const payload = data && typeof data === "object" ? data : null;
+    const code = payload && (payload.error_code || payload.code);
+    const message = (payload && (payload.error || payload.error_code)) || r.statusText || "HTTP " + r.status;
+    throw Object.assign(new Error(message), { status: r.status, code, error_code: code });
+  }
+  return options.withMeta
+    ? { status: r.status, data, etag: r.headers.get("ETag") || "" }
+    : data;
 }
 
 // openExternal opens a URL in the system browser. In the plain browser daemon
@@ -58,6 +70,9 @@ async function openExternal(url) {
     banner("打开链接失败：" + e.message, true);
   }
 }
+
+const nodeDependencyUI = window.SkillManagerNodeDependency?.createController(document, openExternal) || null;
+window.SkillManagerNodeDependencyUI = nodeDependencyUI;
 
 // Any external http(s) link — including the static ones in the in-app guide —
 // must open in the system browser, never navigate THIS view. In the desktop
@@ -131,7 +146,7 @@ const state = {
   onlineLimit: 0, // 在线结果数量限制：0=全部 | 10 | 20 | 50（齿轮弹窗，持久化）
   // 在线搜索结果独立 state——只由显式触发更新，不挂在每次按键的渲染上。
   // gen 是世代计数器：触发时 +1，迟到的旧响应若 gen 不符则丢弃（防 stale 覆盖 fresh）。
-  skillsShOnline: { term: "", loading: false, available: true, results: [], error: "", errSh: "", errMp: "", gen: 0 },
+  skillsShOnline: { term: "", loading: false, available: true, results: [], error: "", errSh: "", errMp: "", errHub: "", gen: 0 },
 };
 
 // 安装并发锁：同一时刻只允许一个 npx skills add 在跑，其它安装按钮禁用。
@@ -168,9 +183,10 @@ const CONTRIB_ERR = {
   save_failed: "配置保存失败",
 };
 
-const harnessClass = (h) => (h === "codex" ? "st-linked-codex" : h === "cc" ? "st-cc" : "st-unknown");
+const harnessClass = (h) => (h === "codex" ? "st-linked-codex" : h === "cc" ? "st-cc" : h === "pi" ? "st-pi" : "st-unknown");
 const LOCAL_NS = "@local";
 const AGENTS_NS = "@agents"; // skills.sh shared dir namespace (~/.agents/skills)
+const SKILLHUB_NS = "@skillhub"; // SkillHub registry store namespace (managed store)
 const dirNS = (id) => "@dir:" + id; // user-registered local directory source namespace
 
 // SRC maps a classified source kind to its badge label + CSS class (phase 3 U8).
@@ -211,10 +227,92 @@ function toast(msg, kind) {
   toastTimer = setTimeout(() => t.classList.add("hidden"), 3200);
 }
 
+// --- 意见反馈 ---
+const feedbackImages = []; // {file, url}
+
+function renderFeedbackThumbs() {
+  const box = $("#feedback-thumbs"); box.innerHTML = "";
+  feedbackImages.forEach((im, i) => {
+    const wrap = ce("span", { className: "fb-thumb" });
+    const img = ce("img"); img.src = im.url; wrap.append(img);
+    const x = ce("button", { className: "fb-thumb-x ghost", textContent: "×", title: "移除" });
+    x.onclick = () => { URL.revokeObjectURL(im.url); feedbackImages.splice(i, 1); renderFeedbackThumbs(); };
+    wrap.append(x);
+    box.append(wrap);
+  });
+}
+function addFeedbackImages(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    if (feedbackImages.length >= 5) { toast("截图最多 5 张", "err"); break; }
+    if (f.size > 5 * 1024 * 1024) { toast("单张截图不能超过 5MB", "err"); continue; }
+    feedbackImages.push({ file: f, url: URL.createObjectURL(f) });
+  }
+  renderFeedbackThumbs();
+}
+function clearFeedbackImages() {
+  feedbackImages.splice(0).forEach((im) => URL.revokeObjectURL(im.url));
+  renderFeedbackThumbs();
+}
+function openFeedback() {
+  $("#feedback-text").value = "";
+  clearFeedbackImages();
+  $("#feedback-modal").classList.remove("hidden");
+  $("#feedback-text").focus();
+}
+function closeFeedback() {
+  $("#feedback-modal").classList.add("hidden");
+  clearFeedbackImages();
+}
+async function submitFeedback() {
+  const text = $("#feedback-text").value.trim();
+  if (!text) { toast("请先写点意见", "err"); return; }
+  const btn = $("#feedback-submit"); btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append("text", text);
+    feedbackImages.forEach((im) => fd.append("images", im.file, im.file.name || "screenshot.png"));
+    const r = await fetch("/api/feedback", { method: "POST", headers: { Authorization: "Bearer " + TOKEN }, body: fd });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || ("HTTP " + r.status)); }
+    toast("已提交，谢谢你的反馈！");
+    closeFeedback();
+  } catch (e) {
+    toast("提交失败：" + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("#feedback-btn").onclick = openFeedback;
+$("#feedback-close").onclick = closeFeedback;
+$("#feedback-cancel").onclick = closeFeedback;
+$("#feedback-submit").onclick = submitFeedback;
+$("#feedback-file").onchange = (e) => { addFeedbackImages(e.target.files); e.target.value = ""; };
+$("#feedback-text").addEventListener("paste", (e) => {
+  const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
+    .filter((it) => it.type.startsWith("image/"))
+    .map((it) => it.getAsFile())
+    .filter(Boolean);
+  if (imgs.length) { e.preventDefault(); addFeedbackImages(imgs); }
+});
+
 function hostOf(u) { try { return new URL(u).hostname; } catch { return u; } }
 function targetLabel(dir) {
   const t = state.targets.find((x) => x.dir === dir);
   return (t && t.alias) || dir;
+}
+
+// shortPath 头部省略、保留尾部路径段（尾巴最有信息量：项目名/.claude/skills）。
+// 别名（如 cc）本就短，原样返回；只在超长时截。完整值由调用方放进 title 供 hover。
+function shortPath(p, max = 34) {
+  if (!p || p.length <= max) return p;
+  const segs = p.split("/").filter(Boolean);
+  let out = segs.pop() || "";
+  while (segs.length) {
+    const next = segs[segs.length - 1] + "/" + out;
+    if (next.length + 2 > max) break; // +2 预留前缀「…/」
+    out = next; segs.pop();
+  }
+  return "…/" + out;
 }
 
 const targetDirs = () => state.targets.map((t) => t.dir);
@@ -242,7 +340,10 @@ async function load(sync) {
   if (sync) { try { await api("POST", "/api/apply"); } catch { /* status still loads */ } }
   try { state.status = await api("GET", "/api/status"); }
   catch (e) { banner("加载失败：" + e.message, true); return; }
+  nodeDependencyUI?.setStatus(state.status);
+  window.SkillManagerContent?.onMainStatus(state.status);
   state.npxAvailable = !!state.status.npxAvailable;
+  $("#feedback-btn").classList.toggle("hidden", !state.status.feedback);
   if (state.status.version) { // set only the tab/window title; header no longer shows a version
     document.title = "SkillManager v" + state.status.version;
   }
@@ -271,6 +372,9 @@ async function load(sync) {
   // skills.sh skill（第三方，可在「+ 添加」里链接进目标，selector 用 @agents/<name>）。
   try { state.skillsShSkills = (await api("GET", "/api/skillssh")) || []; }
   catch { state.skillsShSkills = []; }
+  // SkillHub registry skill（装进受管 store，可在 @skillhub 命名空间下链接进目标）。
+  try { state.skillHubSkills = (await api("GET", "/api/skillhub")) || []; }
+  catch { state.skillHubSkills = []; }
   await refreshPresets();
   renderStats(); renderRepos(); renderTabs(); renderSummary();
   if (state.asideTab === "presets") renderPresets();
@@ -280,7 +384,7 @@ async function load(sync) {
   lastSig = computeSig({
     repos: state.status.repos, localSources: state.dirSources,
     skillsByRepo: state.skillsByRepo, pluginSkills: state.pluginSkills,
-    skillsShSkills: state.skillsShSkills, inventory: state.inventory,
+    skillsShSkills: state.skillsShSkills, skillHubSkills: state.skillHubSkills, inventory: state.inventory,
   });
   if (state.status.gitError) {
     banner("未检测到 git：" + state.status.gitError + "。请安装 Git 并确保在 PATH 中，然后重启本工具——否则无法拉取/更新仓库。", true);
@@ -312,7 +416,7 @@ function computeSig(p) {
   const invTok = (p.inventory || [])
     .map((i) => (i.name || "") + "|" + (i.kind || "") + "|" + (i.source || i.ns || "") + "|" + (i.version || "") + "|" + (i.enabled ? 1 : 0))
     .sort().join(",");
-  return [repoTok, srcTok, byRepo, skillTok(p.pluginSkills), skillTok(p.skillsShSkills), invTok].join("§");
+  return [repoTok, srcTok, byRepo, skillTok(p.pluginSkills), skillTok(p.skillsShSkills), skillTok(p.skillHubSkills), invTok].join("§");
 }
 
 // fetchSnapshot pulls the same change-sensitive data load() reads, WITHOUT
@@ -329,15 +433,16 @@ async function fetchSnapshot() {
     catch { return [name, []]; }
   }));
   const skillsByRepo = Object.fromEntries(entries);
-  let pluginSkills = [], skillsShSkills = [], inventory = [];
+  let pluginSkills = [], skillsShSkills = [], skillHubSkills = [], inventory = [];
   try { pluginSkills = (await api("GET", "/api/plugins")) || []; } catch { /* probe stays best-effort */ }
   try { skillsShSkills = (await api("GET", "/api/skillssh")) || []; } catch { /* idem */ }
+  try { skillHubSkills = (await api("GET", "/api/skillhub")) || []; } catch { /* idem */ }
   const t = currentTarget();
   if (t) {
     try { inventory = ((await api("GET", "/api/inventory?target=" + encodeURIComponent(t))).items) || []; }
     catch { /* idem */ }
   }
-  return { repos, localSources, skillsByRepo, pluginSkills, skillsShSkills, inventory };
+  return { repos, localSources, skillsByRepo, pluginSkills, skillsShSkills, skillHubSkills, inventory };
 }
 
 // autoSyncTick is the background auto-sync. Users may add/remove/edit local skill
@@ -374,9 +479,17 @@ function renderStats() {
   el.innerHTML = "";
   el.append(ce("span", { innerHTML: `仓库 <b>${repos}</b>`, title: "已登记的 git 仓数量" }));
   el.append(ce("span", { innerHTML: `收录 skills <b>${total}</b>`, title: `SkillManager 一共收录管控的 skill 数：git 源 + 本地源 ${catalog} 个，npx(skills.sh) 源 ${npx} 个。` }));
-  const c = ce("span", { innerHTML: `冲突 <b>${cfN || 0}</b>`, title: "跨源体检：名称重复 / 关键词重叠——点击查看" });
-  c.className = (cfN ? "stat-warn " : "") + "clickable-stat";
+  const c = ce("span", { innerHTML: `${cfN ? '<span class="conflict-stat-icon" aria-hidden="true"></span>' : ''}冲突 <b>${cfN || 0}</b>`, title: "跨源体检：名称重复 / 关键词重叠——点击查看" });
+  c.className = (cfN ? "stat-warn stat-conflict " : "") + "clickable-stat";
+  c.setAttribute("role", "button");
+  c.tabIndex = 0;
   c.onclick = openConflictModal;
+  c.onkeydown = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openConflictModal();
+    }
+  };
   el.append(c);
 }
 
@@ -505,8 +618,20 @@ function renderRepos() {
     } else {
       dot.title = dotKind === "ok" ? "上次同步成功" : dotKind === "err" ? "上次同步失败" : "尚未同步";
     }
-    top.append(dot, ce("span", { className: "repo-name", textContent: repo.name }), stateBadge(repo.state || "never-synced"));
-    if (repo.hasUpdate) top.append(ce("span", { className: "badge has-update", textContent: "有更新", title: "上游有新提交，点「立即更新」拉取" }));
+    const nameSpan = ce("span", { className: "repo-name", textContent: repo.alias || repo.name, title: repo.alias ? ("仓库名：" + repo.name + "（双击改别名）") : "双击设别名，便于区分多个仓库" });
+    nameSpan.ondblclick = (e) => { e.stopPropagation(); startRepoAliasEdit(repo, nameSpan); };
+    top.append(dot, nameSpan);
+    const rename = ce("button", { className: "ghost small repo-rename", textContent: "✎", title: "设别名（便于区分多个仓库）", style: "padding:0 6px;line-height:1" });
+    rename.onclick = (e) => { e.stopPropagation(); startRepoAliasEdit(repo, nameSpan); };
+    top.append(rename);
+    // 「有更新」（上游领先）与 state 徽章语义重叠：hasUpdate 时只显示可动作的「有更新」，
+    // 否则显示 state（已同步 / 未更新 / 未同步），避免「未更新」+「有更新」同时出现看着矛盾。
+    if (repo.hasUpdate) {
+      top.append(ce("span", { className: "badge has-update", textContent: "有更新", title: "上游有新提交，点「同步仓库」拉取" }));
+    } else {
+      top.append(stateBadge(repo.state || "never-synced"));
+    }
+    if (repo.alias) top.append(ce("span", { className: "muted", style: "font-size:11px;opacity:.6", textContent: repo.name }));
     li.append(top);
     li.append(ce("div", { className: "repo-url", textContent: repo.url }));
     const meta = ce("div", { className: "repo-meta" });
@@ -542,11 +667,13 @@ function renderRepos() {
   if (sh && sh.count > 0) {
     // npx 分区标题行：全量更新（代调 npx skills update），与 git 仓的全量更新对齐。
     let npxActions = [];
-    if (state.npxAvailable) {
-      const npxUpdate = ce("button", { className: "ghost small", textContent: "全量更新", title: "npx skills update：更新全部 npx skills 的 skill" });
-      npxUpdate.onclick = (e) => { e.stopPropagation(); updateSkillsShAll(npxUpdate); };
-      npxActions = [npxUpdate];
-    }
+    const npxUpdate = ce("button", {
+      className: "ghost small",
+      textContent: state.npxAvailable ? "全量更新" : "需要 Node.js",
+      title: state.npxAvailable ? "npx skills update：更新全部 npx skills 的 skill" : "安装或升级 Node.js 后重启 SkillManager，再更新 skills.sh skill",
+    });
+    npxUpdate.onclick = (e) => { e.stopPropagation(); updateSkillsShAll(npxUpdate); };
+    npxActions = [npxUpdate];
     if (!sectionHead(ul, "npx", "npx skills", npxActions)) {
     const shLi = ce("li", { className: "repo-card repo-skillssh clickable", title: "查看 npx skills 管理的 skill" });
     shLi.onclick = () => openSkillsShModal();
@@ -560,12 +687,20 @@ function renderRepos() {
     smeta.append(ce("span", { className: "badge count", textContent: sh.count + " skill" }));
     if (!state.npxAvailable) {
       smeta.append(ce("span", { className: "group-spacer" }));
-      smeta.append(ce("span", { className: "inv-hint", textContent: "npx 不可用" }));
+      const dependency = state.status && state.status.nodeDependency;
+      const hint = dependency && dependency.state === "too_old"
+        ? "Node.js " + (dependency.version || "版本过旧") + "（需要 ≥" + (dependency.requiredVersion || "22.20.0") + "）"
+        : "需要 Node.js ≥" + (dependency && dependency.requiredVersion || "22.20.0");
+      smeta.append(ce("span", { className: "inv-hint", textContent: hint }));
     }
     shLi.append(smeta);
     ul.append(shLi);
     } // /npx section
   }
+
+  // SkillHub（npx @astron-team/skillhub）不占独立源卡：它是「在线（+ 添加 搜索）」里的
+  // 一个源，token 在搜索区的 ⚙ 里配置，安装的 skill 走 @skillhub 命名空间软链进目标、
+  // 直接进「目录现状 / 预设」，与 skillsmp 一致（skillsmp 也没有独立卡）。
 
   // 本地源：同一类能力——都是「本地源」。区别只在来源：
   //   · local —— SkillManager 创建的受管存储（备份/手写归此，可删 skill）
@@ -627,7 +762,10 @@ function setAsideTab(tab) {
   $("#seg-presets").classList.toggle("active", tab === "presets");
   $("#repo-list").classList.toggle("hidden", tab !== "sources");
   $("#presets-view").classList.toggle("hidden", tab !== "presets");
-  if (tab === "presets") renderPresets();
+  // Re-fetch on switch (not just re-render the cache): 分组 can now be created
+  // out-of-band via the CLI / loopback API, so the cached state.presets may be
+  // stale. Pull fresh, then render.
+  if (tab === "presets") refreshPresets().then(renderPresets);
 }
 
 async function refreshPresets() {
@@ -754,7 +892,7 @@ function presetCatalog() {
   });
   (state.status.repos || []).forEach((repo) => {
     const items = mapItems(repo.name, state.skillsByRepo[repo.name]);
-    if (items.length) groups.push({ ns: repo.name, label: repo.name + "（git 仓）", items });
+    if (items.length) groups.push({ ns: repo.name, label: (repo.alias || repo.name) + "（git 仓）", items });
   });
   const loc = mapItems(LOCAL_NS, state.skillsByRepo[LOCAL_NS]);
   if (loc.length) groups.push({ ns: LOCAL_NS, label: "local（本地源）", items: loc });
@@ -764,6 +902,8 @@ function presetCatalog() {
   });
   const npx = mapItems(AGENTS_NS, state.skillsShSkills);
   if (npx.length) groups.push({ ns: AGENTS_NS, label: "npx skills", items: npx });
+  const hub = mapItems(SKILLHUB_NS, state.skillHubSkills);
+  if (hub.length) groups.push({ ns: SKILLHUB_NS, label: "SkillHub", items: hub });
   return groups;
 }
 
@@ -1058,7 +1198,7 @@ async function openSkillsShModal() {
       const rm = ce("button", { className: "danger small", textContent: "卸载", title: "卸载：删除 ~/.agents/skills 下真身 + 所有软链" });
       rm.onclick = () => uninstallSkillsSh(name, rm, async () => render((await api("GET", "/api/skillssh")) || []));
       r1.append(rm);
-      // 启用状态（停用/启用/自动同步中）放最右——与 git 仓弹窗顺序一致（动作在左、状态在最右）。
+      // 启用状态（停用/启用/整仓 follow 时置灰的锁定停用）放最右——与 git 仓弹窗顺序一致（动作在左、状态在最右）。
       r1.append(enableControl(AGENTS_NS, name, follow, present.has(name), target, () => render(skills)));
       main.append(r1);
       if (sk.description) main.append(ce("div", { className: "skill-desc", textContent: sk.description }));
@@ -1083,10 +1223,20 @@ async function openSkillsShModal() {
   }
 }
 
+// SkillHub (npx @astron-team/skillhub): search + install live in the unified online
+// search (a 3rd source alongside skills.sh / skillsmp). Download-ONLY from the CLI's
+// built-in public registry — no registry/token/auth config. No source card:
+// installed @skillhub skills link into targets and appear in 目录现状 / 预设 like
+// any source; skillsmp has no card either. installedSkillHubNames dedups online hits.
+function installedSkillHubNames() {
+  return new Set((state.skillHubSkills || []).map((s) => (s.linkName || s.logicalName || "").toLowerCase()));
+}
+
 // updateSkillsShOne updates a single skills.sh skill via `npx skills update
 // <name>` (delegated — we never take ownership). On success re-renders the list
 // so the new version shows.
 async function updateSkillsShOne(name, btn, after) {
+  if (nodeDependencyUI && !nodeDependencyUI.requireNode(btn)) return;
   const old = btn.textContent; btn.disabled = true; btn.textContent = "更新中…";
   try {
     const d = await api("POST", "/api/skillssh/update", { name });
@@ -1099,6 +1249,7 @@ async function updateSkillsShOne(name, btn, after) {
 }
 
 async function updateSkillsShAll(btn) {
+  if (nodeDependencyUI && !nodeDependencyUI.requireNode(btn)) return;
   const old = btn.textContent; btn.disabled = true; btn.textContent = "更新中…";
   try {
     const d = await api("POST", "/api/skillssh/update-all", {});
@@ -1118,9 +1269,10 @@ async function updateSkillsShAll(btn) {
 function openRepoSkills(repoName, opts) {
   opts = opts || {};
   const ns = opts.ns || repoName; // selector namespace for enable / 自动同步
-  $("#repo-skills-title").textContent = opts.title || (opts.local ? "local · 本地源" : repoName);
+  $("#repo-skills-title").textContent = opts.title || (opts.local ? "local · 本地源" : (opts.git ? repoDisplayName(repoName) : repoName));
   const body = $("#repo-skills-body");
   let creators = {}; // git repos only: skill dir name → {creator, createdAt}, for the card badge
+  let filterText = ""; // 弹窗内 skill 过滤词，跨 render() 保留（启用/移动/删除后重建列表不丢）
   const render = () => {
     // 保留滚动位置：删除/移动后 render() 会重建整个列表，否则滚动条弹回顶部（回到首个），
     // 体验差。先记下旧 .rs-list 的 scrollTop，重建后还原。
@@ -1131,11 +1283,15 @@ function openRepoSkills(repoName, opts) {
     // Toolbar: which target we enable into + the 自动同步 toggle for this source.
     const bar = ce("div", { className: "rs-toolbar" });
     if (target) {
-      bar.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "启用到当前目录：" + targetLabel(target) }));
+      const full = targetLabel(target);
+      bar.append(ce("span", { className: "muted rs-target", style: "font-size:12px", textContent: "启用到当前目录：" + shortPath(full), title: full }));
     } else {
       bar.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "未选择同步目录——先在上方选一个目录标签页，再启用。" }));
     }
-    bar.append(ce("span", { className: "group-spacer" }));
+    // 过滤输入框：占据「启用到当前目录」与右侧按钮之间的中段，实时按名称/描述筛选下面的卡片。
+    const filter = ce("input", { className: "rs-filter", type: "search", placeholder: "过滤 skill（名称 / 描述）…", value: filterText });
+    filter.oninput = () => { filterText = filter.value; applyFilter(); };
+    bar.append(filter);
     // 顺序：同步仓库（左）→ 取消同步 / 自动同步 skill（右）。
     // git 仓专属：「同步仓库」（更新+上传合并）。无本地改动直接更新；有改动则弹窗
     // 勾选上传内容（确认=更新并上传 / 仅更新）。软链 skill 的仓级操作只在这里做。
@@ -1166,6 +1322,13 @@ function openRepoSkills(repoName, opts) {
     // The cards live in their own scrolling list; the toolbar above stays fixed.
     const list = ce("div", { className: "rs-list" });
     body.append(list);
+    // applyFilter 只做显示/隐藏，不重建列表——所以输入时不会丢焦点；filterText 跨 render 保留。
+    const applyFilter = () => {
+      const q = filterText.trim().toLowerCase();
+      list.querySelectorAll(".rs-card").forEach((c) => {
+        c.style.display = !q || (c.dataset.search || "").includes(q) ? "" : "none";
+      });
+    };
     const skills = state.skillsByRepo[repoName] || [];
     if (skills.length === 0) { list.append(ce("div", { className: "empty", textContent: "该源暂无 skill。" })); return; }
     const present = new Set(state.inventory.filter((i) => i.managed).map((i) => i.name));
@@ -1207,8 +1370,10 @@ function openRepoSkills(repoName, opts) {
       main.append(r1);
       if (sk.description) main.append(ce("div", { className: "skill-desc", textContent: sk.description }));
       card.append(main);
+      card.dataset.search = (cleanSkillName(nm) + " " + nm + " " + (sk.description || "")).toLowerCase();
       list.append(card);
     });
+    applyFilter(); // 应用（重建后仍保留的）过滤词
     list.scrollTop = prevScroll; // 还原滚动位置（内容变矮时浏览器自动夹到底部）
   };
   render();
@@ -1222,16 +1387,31 @@ function openRepoSkills(repoName, opts) {
   }
 }
 
+// followLockedBtn renders the disabled 「停用」shown for a skill that is covered by
+// a whole-source 整仓自动同步 (follow): it is enabled as part of the set and cannot
+// be toggled individually. ONE authoritative renderer, used by every surface
+// (source modals + global search via enableControl, and the 目录现状 inventory via
+// inventoryCard) so the follow-locked affordance never diverges between views
+// again. Earlier the modal/search path showed an ambiguous "自动同步中" text label
+// (reads like a sync is in progress) while the inventory showed this greyed 停用 —
+// two looks for one state; this collapses them to the 停用 form.
+function followLockedBtn(srcLabel) {
+  const msg = "「" + srcLabel + "」整仓自动同步中，不能单独停用该 skill。如需停用，请在该源弹窗点「取消启用」（会移除该源在本目录的全部 skill）。";
+  const off = ce("button", { className: "danger small", textContent: "停用", style: "opacity:.4;cursor:not-allowed", title: msg });
+  off.onclick = () => toast(msg, "info");
+  return off;
+}
+
 // enableControl returns the per-skill action used inside the source modals: a
 // SINGLE button that reflects the current state and flips it — 「停用」when the
 // skill is enabled in the target (click → tear down the link), 「启用」when it is
 // not (click → build the link, with same-name shadow confirmation). The two are
-// mutually exclusive: only one shows at a time. Under 自动同步 (or with no target)
-// individual toggling is unavailable, so a hint shows instead. render re-renders
+// mutually exclusive: only one shows at a time. Under 整仓自动同步 a greyed, locked
+// 停用 shows instead (followLockedBtn); with no target, a hint. render re-renders
 // the modal.
 function enableControl(ns, name, follow, enabled, target, render) {
   if (!target) return ce("span", { className: "inv-hint", textContent: "未选目录" });
-  if (follow) return ce("span", { className: "inv-hint", textContent: "自动同步中" });
+  if (follow) return followLockedBtn(sourceMeta(ns).label);
   const sel = ns + "/" + name;
   if (enabled) {
     const off = ce("button", { className: "danger small", textContent: "停用", title: "拆除当前目录下的软链（不影响真身与其它目录）" });
@@ -1509,7 +1689,9 @@ async function deleteLocalSkill(name, btn, rerender) {
 function defaultTabLabel(dir) {
   const parts = dir.replace(/\/+$/, "").split("/").filter(Boolean);
   if (parts.length && parts[parts.length - 1].toLowerCase() === "skills") parts.pop();
-  if (parts.length && /^\.(claude|codex|agents)$/.test(parts[parts.length - 1])) parts.pop();
+  // pi 全局在 .pi/agent/skills —— 去掉 "skills" 后还剩 "agent" 这一层，多剥一层
+  if (parts.length >= 2 && parts[parts.length - 1] === "agent" && parts[parts.length - 2] === ".pi") parts.pop();
+  if (parts.length && /^\.(claude|codex|agents|pi)$/.test(parts[parts.length - 1])) parts.pop();
   return parts[parts.length - 1] || dir;
 }
 
@@ -1539,6 +1721,35 @@ function startAliasEdit(t, tab) {
   input.onblur = () => commit(true);
   // Keep clicks inside the input from bubbling to the tab (which would switch
   // tabs and re-render, destroying the input mid-edit).
+  input.onclick = (e) => e.stopPropagation();
+  input.onmousedown = (e) => e.stopPropagation();
+  input.ondblclick = (e) => e.stopPropagation();
+}
+
+// startRepoAliasEdit turns a git repo card's name into an inline text input
+// (mirrors startAliasEdit; WKWebView blocks native prompt). Enter/blur saves via
+// /api/repos/alias, Esc cancels; empty clears the alias (card reverts to name).
+function startRepoAliasEdit(repo, span) {
+  const parent = span.parentNode;
+  if (!parent || parent.querySelector(".tab-alias-input")) return;
+  const input = ce("input", { className: "tab-alias-input", value: repo.alias || "" });
+  input.placeholder = repo.name;
+  span.replaceWith(input);
+  input.focus(); input.select();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    if (save) {
+      try { await api("POST", "/api/repos/alias", { name: repo.name, alias: input.value.trim() }); await load(); return; }
+      catch (err) { banner("保存别名失败：" + err.message, true); }
+    }
+    renderRepos();
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(true); }
+    else if (e.key === "Escape") { e.preventDefault(); commit(false); }
+  };
+  input.onblur = () => commit(true);
   input.onclick = (e) => e.stopPropagation();
   input.onmousedown = (e) => e.stopPropagation();
   input.ondblclick = (e) => e.stopPropagation();
@@ -1734,12 +1945,20 @@ function verTag(v) {
   return ce("span", { className: "ver-tag", textContent: "v" + v, title: "版本 " + v });
 }
 
+// repoDisplayName returns a git repo's alias if set, else its derived name. The
+// namespace/selector is always the derived name — this is display-only.
+function repoDisplayName(name) {
+  const r = ((state.status && state.status.repos) || []).find((x) => x.name === name);
+  return (r && r.alias) || name;
+}
+
 // sourceMeta maps a source namespace to a display label + badge class.
 function sourceMeta(ns) {
   if (ns === AGENTS_NS) return { label: "skills.sh", cls: "src-skillssh" };
+  if (ns === SKILLHUB_NS) return { label: "SkillHub", cls: "src-skillssh" };
   if (ns === LOCAL_NS) return { label: "local", cls: "src-local" };
   if (ns.startsWith("@dir:")) return { label: dirLabel(ns.slice(5)), cls: "src-local" };
-  return { label: ns, cls: "src-git" }; // git repo name
+  return { label: repoDisplayName(ns), cls: "src-git" }; // git repo (alias or name)
 }
 
 // renderSearchResults is the GLOBAL skill search: instead of filtering only the
@@ -1827,10 +2046,12 @@ async function runOnlineSearch() {
   o.term = term; o.loading = true; o.error = ""; o.available = true;
   renderInventory();
   try {
-    // 两个在线源并行：skills.sh（npx skills find）+ skillsmp（REST API）。各自失败不拖累对方。
-    const [sh, mp] = await Promise.all([
+    // 三个在线源并行：skills.sh（npx skills find）+ skillsmp（REST API）+
+    // SkillHub（npx @astron-team/skillhub search）。各自失败不拖累其它源。
+    const [sh, mp, hub] = await Promise.all([
       api("GET", "/api/skillssh/find?q=" + encodeURIComponent(term)).catch((e) => ({ error: e.message, results: [] })),
       api("GET", "/api/skillsmp/find?q=" + encodeURIComponent(term)).catch((e) => ({ error: e.message, results: [] })),
+      api("GET", "/api/skillhub/find?q=" + encodeURIComponent(term)).catch((e) => ({ error: e.message, results: [] })),
     ]);
     if (gen !== o.gen) return; // a newer search superseded this one
     const results = [];
@@ -1840,21 +2061,58 @@ async function runOnlineSearch() {
       desc: r.description, author: r.author, installs: r.stars || 0,
       installsRaw: r.stars ? "★ " + r.stars : "",
     }));
-    // 在线安装两源都走 npx，所以可用性以 skills.sh（npx 在否）为准。
-    o.available = sh && sh.available !== false;
+    (hub && hub.results || []).forEach((r) => results.push({
+      origin: "skillhub", skill: r.slug, name: r.name, namespace: r.namespace,
+      version: r.version, desc: r.description, installs: 0, installsRaw: "",
+    }));
+    // skillsmp search is plain HTTP and remains useful without local Node.
+    // Keep the section available whenever at least one source answered as usable.
+    o.available = [sh, mp, hub].some((source) => source && source.available === true);
     o.results = results;
-    // 容错：两源的错误分开存，互不遮蔽——任一源失败只在区内提示一条，不影响另一源结果。
+    // 容错：各源的错误分开存，互不遮蔽——任一源失败只在区内提示一条，不影响其它源结果。
     o.errSh = (sh && sh.error) || "";
     o.errMp = (mp && mp.error) || "";
+    o.errHub = (hub && hub.error) || "";
     o.rateLimit = (mp && mp.rateLimit) || null; // skillsmp 当日配额（每次搜索刷新）
     o.error = ""; // 仅保留给下方 catch 的「整体失败」（正常路径不触发）
   } catch (e) {
     if (gen !== o.gen) return;
-    o.available = true; o.results = []; o.errSh = ""; o.errMp = ""; o.rateLimit = null; o.error = e.message;
+    o.available = true; o.results = []; o.errSh = ""; o.errMp = ""; o.errHub = ""; o.rateLimit = null; o.error = e.message;
   } finally {
     if (gen === o.gen) { o.loading = false; renderInventory(); }
   }
 }
+
+// Keep the content workspace on the same authenticated API and online search
+// path as the existing manager. This bridge is published before load() starts.
+window.SkillManagerAPI = Object.freeze({
+  request: api,
+  openExternal,
+  currentTarget() { return currentTarget(); },
+  async isSkillEnabled(linkName, target = currentTarget(), canonicalDir) {
+    if (!linkName || !target || !canonicalDir) return false;
+    const inventory = await api("GET", "/api/inventory?target=" + encodeURIComponent(target));
+    const selector = AGENTS_NS + "/" + linkName;
+    return !!inventory && inventory.target === target && Array.isArray(inventory.items) && inventory.items.some((item) =>
+      item && item.name === linkName && item.selector === selector && item.linkTarget === canonicalDir && item.managed === true && item.enabled === true);
+  },
+  async refreshSkillsSh() {
+    const [skills, status] = await Promise.all([
+      api("GET", "/api/skillssh"),
+      api("GET", "/api/status"),
+    ]);
+    state.skillsShSkills = Array.isArray(skills) ? skills : [];
+    if (status && typeof status === "object") state.status = status;
+    return state.skillsShSkills;
+  },
+  async searchSkills(term) {
+    const value = String(term || "").trim().slice(0, 200);
+    state.search = value;
+    $("#search").value = value;
+    window.SkillManagerContent?.showMarketSearch();
+    await runOnlineSearch();
+  },
+});
 
 // renderOnlineSection renders state.skillsShOnline (render-only; no fetch). Dedup
 // against local install/enable state drives which control each result shows.
@@ -1864,7 +2122,10 @@ function renderOnlineSection(root, allLocal, enabledSel) {
   const src = state.onlineSrc || "both";
   const sort = state.onlineSort || "default";
   const limit = state.onlineLimit || 0;
-  let shown = src === "both" ? o.results.slice() : o.results.filter((r) => r.origin === (src === "skillssh" ? "skills.sh" : "skillsmp"));
+  // 来源筛选码 → 结果里的 origin / 展示名。三源：skills.sh / skillsmp / SkillHub。
+  const srcOrigin = { skillssh: "skills.sh", skillsmp: "skillsmp", skillhub: "skillhub" };
+  const srcLabel = (s) => s === "skillssh" ? "skills.sh" : s === "skillsmp" ? "skillsmp" : s === "skillhub" ? "SkillHub" : s;
+  let shown = src === "both" ? o.results.slice() : o.results.filter((r) => r.origin === srcOrigin[src]);
   if (sort === "desc") shown.sort((a, b) => (b.installs || 0) - (a.installs || 0));
   else if (sort === "asc") shown.sort((a, b) => (a.installs || 0) - (b.installs || 0));
   const totalMatched = shown.length;
@@ -1885,7 +2146,7 @@ function renderOnlineSection(root, allLocal, enabledSel) {
   head.append(ce("span", { className: "group-title", textContent: "在线（npx skills）" }));
   if (o.loading) head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "搜索中…" }));
   else if (o.term) head.append(ce("span", { className: "badge count", textContent: shown.length + " skill" }));
-  if (src !== "both") head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "· 仅 " + (src === "skillssh" ? "skills.sh" : "skillsmp") }));
+  if (src !== "both") head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "· 仅 " + srcLabel(src) }));
   if (sort !== "default") head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "· 热度" + (sort === "desc" ? "↓" : "↑") }));
   if (limit > 0 && capped) head.append(ce("span", { className: "muted", style: "font-size:12px", textContent: "· " + (src === "both" ? "每源前 " + limit : "前 " + limit) + "（共 " + shown.length + "/" + totalMatched + "）" }));
   // skillsmp 当日配额（配了 key 才显示；每次搜索后由响应头刷新）。
@@ -1901,49 +2162,55 @@ function renderOnlineSection(root, allLocal, enabledSel) {
   root.append(head);
 
   if (folded) return; // 在线区折叠：只显示标题
-  if (!o.available) { root.append(ce("div", { className: "empty", textContent: "在线搜索当前不可用（需联网，且本机要有 npx）。本地搜索不受影响。" })); return; }
+  if (!o.available) { root.append(ce("div", { className: "empty", textContent: "在线搜索当前不可用（请检查网络；在线安装与更新需要 Node.js ≥22.20.0）。本地搜索不受影响。" })); return; }
   if (o.loading) { root.append(ce("div", { className: "empty", textContent: "正在查询在线源（skills.sh + skillsmp）…" })); return; }
   if (o.error) { root.append(ce("div", { className: "empty", style: "color:var(--err)", textContent: "在线搜索失败：" + o.error })); return; }
   if (!o.term) { root.append(ce("div", { className: "empty", textContent: "输入关键词后点「搜索」或回车，查在线可安装的 skill（skills.sh + skillsmp）。" })); return; }
   // 单源失败提示（非阻塞）：失败的源不会遮蔽另一个源的结果。触发封控（403）时，
   // 在文案末尾给一个可点击的《配置 API key》——平时不打扰，需要时一键去配。
-  const srcNote = (label, msg, withKeyCfg) => {
+  const srcNote = (label, msg, cfgFn, cfgText) => {
     const d = ce("div", { className: "empty", style: "color:var(--err);font-size:12px;text-align:left" });
     d.append(document.createTextNode(label + " 查询失败：" + msg + "（不影响其它源）"));
-    if (withKeyCfg) {
+    if (cfgFn) {
       d.append(document.createTextNode(" "));
-      const a = ce("a", { className: "online-link", href: "#", textContent: "《配置 API key》" });
-      a.onclick = (e) => { e.preventDefault(); openSmpKeyModal(); };
+      const a = ce("a", { className: "online-link", href: "#", textContent: cfgText || "《配置 API key》" });
+      a.onclick = (e) => { e.preventDefault(); cfgFn(); };
       d.append(a);
     }
     return d;
   };
   const notes = [];
-  if (o.errSh) notes.push(srcNote("skills.sh", o.errSh, false));
-  if (o.errMp) notes.push(srcNote("skillsmp", o.errMp, /403|风控|拒绝访问|额度/.test(o.errMp)));
+  if (o.errSh) notes.push(srcNote("skills.sh", o.errSh, null));
+  if (o.errMp) notes.push(srcNote("skillsmp", o.errMp, /403|风控|拒绝访问|额度/.test(o.errMp) ? openSmpKeyModal : null));
+  if (o.errHub) notes.push(srcNote("SkillHub", o.errHub, null));
 
   if (!o.results.length) {
     if (notes.length) notes.forEach((n) => root.append(n));
     else root.append(ce("div", { className: "empty", textContent: "在线没有匹配「" + o.term + "」的 skill。" }));
     return;
   }
-  if (!shown.length) { root.append(ce("div", { className: "empty", textContent: "当前来源筛选（仅 " + (src === "skillssh" ? "skills.sh" : "skillsmp") + "）下无匹配，点 ⚙ 换来源。" })); notes.forEach((n) => root.append(n)); return; }
+  if (!shown.length) { root.append(ce("div", { className: "empty", textContent: "当前来源筛选（仅 " + srcLabel(src) + "）下无匹配，点 ⚙ 换来源。" })); notes.forEach((n) => root.append(n)); return; }
 
   const installed = installedSkillsShNames();
+  const installedHub = installedSkillHubNames();
   const body = ce("div", { className: "inv-group-body" });
   shown.forEach((r) => {
     const mp = r.origin === "skillsmp";
+    const hub = r.origin === "skillhub";
     const nm = (r.skill || "").toLowerCase();
-    const isInstalled = installed.has(nm);
-    const isEnabled = enabledSel.has(AGENTS_NS + "/" + (r.skill || ""));
+    const isInstalled = hub ? installedHub.has(nm) : installed.has(nm);
+    const isEnabled = enabledSel.has((hub ? SKILLHUB_NS : AGENTS_NS) + "/" + (r.skill || ""));
     const card = ce("div", { className: "skill inv online" + (r.url ? " clickable" : ""), title: r.url ? "查看详情" : "" });
     if (r.url) card.onclick = (e) => { if (e.target.closest("button, a")) return; openExternal(r.url); };
     const main = ce("div", { className: "skill-main" });
     const r1 = ce("div", { className: "skill-row1" });
-    r1.append(ce("span", { className: "skill-name", textContent: r.skill || r.pkg, title: r.skill || r.pkg }));
+    r1.append(ce("span", { className: "skill-name", textContent: r.name || r.skill || r.pkg, title: r.skill || r.pkg }));
     if (r.installsRaw) r1.append(ce("span", { className: "install-count", title: mp ? "GitHub stars" : "安装数", textContent: (mp ? "" : "↓ ") + r.installsRaw }));
-    // 来源徽章：区分 skills.sh 与 skillsmp（两者都走 npx，但发现源不同）。
-    if (mp) {
+    { const vt = verTag(r.version); if (vt) r1.append(vt); }
+    // 来源徽章：区分 skills.sh / skillsmp / SkillHub（都走 npx，但发现源不同）。
+    if (hub) {
+      r1.append(ce("span", { className: "src-badge src-skillssh", title: "来自 SkillHub registry" + (r.namespace ? "（" + r.namespace + "）" : ""), textContent: "SkillHub" }));
+    } else if (mp) {
       r1.append(ce("span", { className: "src-badge src-skillsmp", title: "来自 skillsmp.com" + (r.author ? "（" + r.author + "）" : ""), textContent: "skillsmp" }));
     } else {
       const ownerRepo = r.owner ? r.owner + "/" + r.repo : "skills.sh";
@@ -1952,7 +2219,7 @@ function renderOnlineSection(root, allLocal, enabledSel) {
     r1.append(ce("span", { className: "group-spacer" }));
     r1.append(onlineAction(r, isInstalled, isEnabled));
     main.append(r1);
-    main.append(ce("div", { className: "skill-desc online-sub", textContent: mp ? (r.desc || r.repoUrl || "") : r.pkg }));
+    main.append(ce("div", { className: "skill-desc online-sub", textContent: hub ? (r.desc || "") : mp ? (r.desc || r.repoUrl || "") : r.pkg }));
     if (r.url) {
       // 外链钉在卡片左下角（footer + margin-top:auto，同行卡片对齐）。
       const foot = ce("div", { className: "online-foot" });
@@ -1986,20 +2253,29 @@ function onlineAction(r, isInstalled, isEnabled) {
 // can be 停用 like any other. So "install where you are" at least links to the
 // directory you're looking at. Button state machine: idle→安装中→已安装 / fail(复原)。
 async function installOnline(r, btn) {
+  if (nodeDependencyUI && !nodeDependencyUI.requireNode(btn)) return;
   if (installingPkg) return;
+  const hub = r.origin === "skillhub";
+  const ns = hub ? SKILLHUB_NS : AGENTS_NS;
   const target = currentTarget();
-  installingPkg = r.pkg || (r.repoUrl + "#" + r.skill); // 并发锁键（skillsmp 无 pkg）
+  installingPkg = hub ? ("skillhub#" + r.skill) : (r.pkg || (r.repoUrl + "#" + r.skill)); // 并发锁键（skillsmp/skillhub 无 pkg）
   btn.disabled = true; btn.textContent = "安装中…";
   try {
-    // skills.sh：npx skills add <pkg>；skillsmp：npx skills add <repoUrl> --skill <name>。
-    const addBody = r.origin === "skillsmp" ? { url: r.repoUrl, skill: r.skill } : { pkg: r.pkg };
-    const d = await api("POST", "/api/skillssh/add", addBody);
+    // skills.sh：npx skills add <pkg>；skillsmp：npx skills add <repoUrl> --skill <name>；
+    // SkillHub：npx @astron-team/skillhub install <slug> --dir <受管 store>。
+    let d;
+    if (hub) {
+      d = await api("POST", "/api/skillhub/install", { slug: r.skill });
+    } else {
+      const addBody = r.origin === "skillsmp" ? { url: r.repoUrl, skill: r.skill } : { pkg: r.pkg };
+      d = await api("POST", "/api/skillssh/add", addBody);
+    }
     if (!(d && d.ok)) throw new Error((d && (d.error || d.stderr)) || "未知错误");
-    // Installed to canonical. Now enable into the current directory via our linker.
+    // Installed to its store. Now enable into the current directory via our linker.
     let enabled = false, enableErr = "";
     if (target) {
       try {
-        await api("POST", "/api/enabled", { skill: AGENTS_NS + "/" + r.skill, target, mode: "snapshot" });
+        await api("POST", "/api/enabled", { skill: ns + "/" + r.skill, target, mode: "snapshot" });
         await api("POST", "/api/apply");
         enabled = true;
       } catch (e) { enableErr = e.message; }
@@ -2157,7 +2433,7 @@ function dirLabel(id) {
 // groupOf maps an inventory item to its source group (title + sort order from SOURCE_ORDER).
 function groupOf(i) {
   switch (i.kind) {
-    case "git": return { key: "git:" + (i.repo || ""), title: i.repo || "git 仓", order: SOURCE_ORDER.git };
+    case "git": return { key: "git:" + (i.repo || ""), title: i.repo ? repoDisplayName(i.repo) : "git 仓", order: SOURCE_ORDER.git };
     case "skills.sh":
       // 全部归到一个「skills.sh」组——它们都归 npx skills 管，不按来源仓拆分。
       // 具体来源仓（owner/repo）显示在每张卡片的徽章上。
@@ -2234,17 +2510,15 @@ function inventoryCard(i) {
   // 右侧 = skill 列表，不碰本体。卡片上始终带一个对应的快捷操作（本体操作——移动/删除
   // 本体/整仓同步/启用——只在左侧对应「源」弹窗里做）。点卡片空白处都能打开详情看 SKILL.md。
   // 一致性规则（每种来源都有明确的卡上动作）：
-  //   · 整仓自动同步(follow)  → 「停用」显示但置灰，点击提示不可单独停用；
+  //   · 整仓自动同步(follow)  → 「停用」显示但置灰，点击提示不可单独停用（followLockedBtn，与弹窗/搜索同款）；
   //   · 本工具启用的软链        → 「停用」（/api/enabled，可逆）；
   //   · skills.sh 裸投影         → 「停用」（/api/inventory/link）；
   //   · 杂散/未知软链            → 「删除」（只删链，不动目标）；
   //   · 手写未备份 / 插件 等     → 「操作」（详情里做 备份/删除 或只读说明）。
   if (i.follow && i.managed && i.selector) {
-    const off = ce("button", { className: "danger small", textContent: "停用", style: "opacity:.4;cursor:not-allowed", title: "整仓自动同步中，不能单独停用——请到左侧该源弹窗点「取消启用」" });
-    off.onclick = () => toast("「" + sourceMeta(i.selector.split("/")[0]).label + "」整仓自动同步中，不能单独停用该 skill。请到左侧该源弹窗点「取消启用」（会移除该源在本目录的全部 skill）。", "info");
-    r1.append(off);
+    r1.append(followLockedBtn(sourceMeta(i.selector.split("/")[0]).label));
   } else if (i.managed && i.selector) {
-    const off = ce("button", { className: "danger small", textContent: "停用", title: "拆除当前目录下的软链（不影响本体与其它目录）" });
+    const off = ce("button", { className: "danger small", textContent: "停用", title: "拆除当前目录下的软链（不影响真身与其它目录）" });
     off.onclick = () => disableSkill(i, off);
     r1.append(off);
   } else if (i.kind === "skills.sh") {
@@ -2671,6 +2945,7 @@ function setSkillsShActions(name) {
 // uninstallSkillsSh delegates `npx skills remove <name> -g -y` (drops canonical +
 // all agent symlinks skills.sh made) after SkillManager tears down its own links.
 async function uninstallSkillsSh(name, btn, onDone) {
+  if (nodeDependencyUI && !nodeDependencyUI.requireNode(btn)) return;
   if (!(await confirmModal("卸载 " + name + "？\n会删除 ~/.agents/skills 下的真身文件 + 所有软链（含本工具建立的、以及 skills.sh 装到各 agent 的）。此操作不可撤销。", "卸载", true))) return;
   const old = btn.textContent; btn.disabled = true; btn.textContent = "卸载中…";
   try {
@@ -2936,7 +3211,7 @@ $("#online-search-btn").onclick = runOnlineSearch;
 // 统一按各源的热度数值。纯客户端，持久化到 localStorage。
 (function wireOnlineFilter() {
   const btn = $("#online-filter-btn"), modal = $("#online-filter-modal");
-  const validSrc = { both: 1, skillssh: 1, skillsmp: 1 };
+  const validSrc = { both: 1, skillssh: 1, skillsmp: 1, skillhub: 1 };
   const validSort = { default: 1, desc: 1, asc: 1 };
   const validLimit = { 0: 1, 10: 1, 20: 1, 50: 1 };
   state.onlineSrc = validSrc[localStorage.getItem("sm.onlineSrc")] ? localStorage.getItem("sm.onlineSrc") : "both";
@@ -2952,6 +3227,8 @@ $("#online-search-btn").onclick = runOnlineSearch;
   btn.onclick = () => { reflect(); modal.classList.remove("hidden"); };
   $("#online-filter-close").onclick = () => modal.classList.add("hidden");
   modal.onclick = (e) => { if (e.target.id === "online-filter-modal") modal.classList.add("hidden"); };
+  // skillsmp key 入口（仅存本机）——从筛选 ⚙ 里进。SkillHub 无鉴权，无需入口。
+  { const b = $("#of-smp-key"); if (b) b.onclick = () => { modal.classList.add("hidden"); openSmpKeyModal(); }; }
   modal.querySelectorAll('input[name="onlineSrc"]').forEach((r) => {
     r.onchange = () => {
       state.onlineSrc = validSrc[r.value] ? r.value : "both";
@@ -3384,8 +3661,8 @@ async function addRepoAndSync(url, branch) {
     }
   } catch (err) { banner("添加失败：" + err.message, true); }
 }
-// chooseHarnessModal: 添加的文件夹既不是 Claude Code 也不是 Codex 的 skill 目录时，
-// 让用户选在它下面创建哪种。返回 ["cc"] / ["codex"] / ["cc","codex"] 或 null(取消)。
+// chooseHarnessModal: 添加的文件夹既不是 Claude Code、Codex 也不是 pi 的 skill 目录时，
+// 让用户选在它下面创建哪种。返回 ["cc"] / ["codex"] / ["pi"] 的任意组合，或 null(取消)。
 function chooseHarnessModal(dir) {
   return new Promise((resolve) => {
     const m = ce("div", { className: "modal" });
@@ -3393,8 +3670,8 @@ function chooseHarnessModal(dir) {
     card.append(ce("div", { className: "modal-head", innerHTML: "<h3>创建 skill 目录</h3>" }));
     const body = ce("div", { className: "help-body" });
     body.append(ce("p", { style: "white-space:pre-wrap;color:var(--text)", textContent: "「" + dir + "」\n不是 Claude Code 或 Codex 的 skill 目录。要在它下面创建哪种？" }));
-    body.append(ce("p", { className: "muted", style: "font-size:12px", textContent: "Claude Code → .claude/skills；Codex → .agents/skills（项目级 Codex 读取处）。" }));
-    // 横向多选：Claude Code / Codex（默认都勾）。
+    body.append(ce("p", { className: "muted", style: "font-size:12px", textContent: "Claude Code → .claude/skills；Codex → .agents/skills（项目级 Codex 读取处）；pi → .pi/skills。" }));
+    // 横向多选：Claude Code / Codex / pi（默认都勾）。
     const opts = ce("div", { className: "row", style: "gap:24px;margin-top:8px" });
     const mk = (label) => {
       const cb = ce("input", { type: "checkbox", checked: true });
@@ -3402,8 +3679,8 @@ function chooseHarnessModal(dir) {
       l.append(cb, ce("span", { textContent: label }));
       return { l, cb };
     };
-    const cc = mk("Claude Code"), cx = mk("Codex");
-    opts.append(cc.l, cx.l);
+    const cc = mk("Claude Code"), cx = mk("Codex"), pi = mk("pi");
+    opts.append(cc.l, cx.l, pi.l);
     body.append(opts);
     card.append(body);
     const row = ce("div", { className: "row", style: "justify-content:flex-end;gap:8px;padding:0 18px 18px" });
@@ -3415,6 +3692,7 @@ function chooseHarnessModal(dir) {
       const kinds = [];
       if (cc.cb.checked) kinds.push("cc");
       if (cx.cb.checked) kinds.push("codex");
+      if (pi.cb.checked) kinds.push("pi");
       if (!kinds.length) { toast("请至少选择一项", "info"); return; }
       done(kinds);
     };

@@ -108,6 +108,11 @@ type Config struct {
 	// TargetAliases is an optional display name per target dir (dir → alias),
 	// shown on the tab instead of the raw path. Purely cosmetic.
 	TargetAliases map[string]string `yaml:"target_aliases,omitempty"`
+	// RepoAliases is an optional display name per git repo (derived repo name →
+	// alias), shown on the source card instead of the derived name so many repos
+	// stay distinguishable. Purely cosmetic — the reconcile selector namespace
+	// stays the derived repo name, never the alias. omitempty for round-trip.
+	RepoAliases map[string]string `yaml:"repo_aliases,omitempty"`
 	// IncludePluginSkills, when true, lets skills living under a .../plugins/...
 	// path appear in the adoptable ("未备份 skill") list. The zero value (false)
 	// ignores them by default — they are managed by the agent's plugin system,

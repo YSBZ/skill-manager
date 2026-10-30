@@ -12,17 +12,18 @@
 
 ### 桌面 app（macOS / Windows）
 
-从 [**Releases** 页面](https://github.com/YSBZ/skill-manager/releases)下载对应平台的包——无需自行构建：
+从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 下载对应平台的桌面包，无需自行构建。
 
-- **macOS**：`SkillManager-desktop-macos-vX.Y.Z.zip`，解压后把 `SkillManager.app` 拖进 `/Applications` 再启动。
+- **macOS**：推荐下载 `SkillManager-desktop-macos-vX.Y.Z.dmg`，双击打开后把 `SkillManager.app` 拖到窗口里的 `Applications` 快捷方式再启动（装进 `/Applications` 还能避开 App Translocation）；也可用 `SkillManager-desktop-macos-vX.Y.Z.zip`，解压后手动拖进 `/Applications`。
 - **Windows**：`SkillManager-desktop-windows-vX.Y.Z.zip`，解压后运行 `SkillManager.exe`（已嵌入应用图标，双击无控制台窗口）。
 
-> **macOS 注意**：未签名 / 未公证的二进制首次会被 Gatekeeper 拦截，需右键 → 打开，或 `xattr -d com.apple.quarantine <app>` 解隔离。
+> **macOS 注意**：安装包使用本地 ad-hoc 签名，未经 Apple 公证。首次打开时 Gatekeeper 可能拦截；请先确认下载来源，再按「隐私与安全性」中的系统提示操作。Apple 的说明见[此处](https://support.apple.com/en-us/102445)。
 
-> **自动更新**：桌面 app 会检查 GitHub 上的新版本,并支持一键应用内更新(下载 → 校验 sha256 → 替换 → 重启)。无需账号或 token——Releases 是公开的。
+> **v1.1.0 build64 升级说明**：GitLab 的 macOS v1.0.0 build63 可以在应用内更新。Windows 旧版更新器只替换 exe；升级时请下载并完整解压 v1.1.0 ZIP，保留 `runtime` 文件夹。GitHub 旧版 v6.0.x 没有用于跨版本比较的递增构建号，因此不会自动识别到 1.x；请从 GitHub Releases 手动安装一次 v1.1.0。后续更新按应用内提示进行。详见 [CHANGELOG.md](CHANGELOG.md)。
 
 - 中央文件夹默认 `~/.skillmanage`（含 config.yaml、manifest.yaml、local 受管存储、lock、address、token）；首次启动自动创建。
 - 在应用窗口里管理一切；标题旁的 `?` 有完整使用指南，更新日志在版本号弹层里。
+- 桌面包内含应用运行所需服务，双击打开即可，不需要手动启动终端服务。Git、npm 的 JavaScript CLI（npm/npx）和固定版 Skills CLI 随包提供。运行 Skill 安装等 Node 操作需要电脑上有 Node.js 22.20.0 或更新版本；若缺少或过旧，只在进行这些操作时提示官方下载页。浏览本地内容、资讯、模型榜和重置日历不依赖 Node。
 
 ## 概念
 
@@ -40,6 +41,7 @@
 ## 功能
 
 - **选择性 / 整仓同步**：每个 tab 独立维护映射——勾选要同步的 skill，或对仓库「自动同步」整仓（上游新增自动加链、删除自动清链）。
+- **分组**：把一组常用 skill 存成**命名集合**，一键**启用 / 移除**到当前目录。分组是**纯引用**——只记住「选了哪些 skill」，**不复制**任何 skill 内容，同一分组可应用到任意目录。两条创建途径：①「镜像当前项目」把该目录已启用的 skill 快照成组；②「创建空组」后用**跨源选择器**从库（git 仓 / 本地源 / npx）勾选 skill 加入。选择器里每个源带「全部启用（整仓）」开关 = 整仓自动同步（`<源>/*`，该源现有及将来全部 skill，开启后不能单独取消）；关闭则逐个勾选。分组**可随时编辑**——**点卡片**打开选择器增删、每个 skill 旁 × 可移除。应用是**叠加**启用（不影响其它已启用项），「从当前移除」只批量停用这一组。**编辑分组**（增删 skill）会自动同步到**已应用该组的目录**——新增的启用、移除的停用，从没用过该组的目录不受影响；**删除整个分组**则拆除其 skill 在**所有目录**的软链。移除 / 删除时与其它分组**共用**的 skill 都保留。左栏顶部有**来源 / 分组**分段切换，三类源（git 仓 / npx skills / 本地源）的分区现可折叠。
 - **更新**：每天定时自动；仓卡片 / 仓弹窗的「同步仓库」手动触发。
   - 无本地改动 → 直接拉取上游。
   - 有本地改动（新增 / 修改 / 删除）→ 弹窗二选一：
@@ -48,6 +50,9 @@
 - **贡献回上游**：本地新增 / 修改 / 删除的 skill 通过「同步仓库」commit + push 回 git 远程，提交信息可编辑。
 - **密钥 / 凭据保护**：上传前若检出疑似密钥文件（`.env`、`*.pem`、`id_rsa`、`.npmrc`、含 credential/secret 的文件等），弹窗标红列出并**闸住「确认」**，必须显式勾选才推；后端也强制拦截（绕过 UI 直接打 API 同样拦得住）。`.env.example` 等模板不算。
 - **在线搜索并安装**：顶部搜索框同时查本地各源与两个在线市场——[skills.sh](https://skills.sh) 与 [skillsmp](https://skillsmp.com)。在线卡片按来源打徽章（skills.sh ↓下载数 / skillsmp ★星数）；安装统一走 `npx skills add`，装进 canonical `~/.agents/skills`（归「npx skills」源），更新 / 停用与其它 npx skill 一致。齿轮 ⚙ 按来源 / 排序 / 数量筛选；两源并行查询，任一源失败不影响另一源。
+- **AI 资讯与 Skill 发现**：浏览 AIHOT 资讯摘要和来源链接，并从资讯查找相关 Skill。发现页突出近一周增长较快的 GitHub 项目以及新发现项目，也可搜索 skills.sh 与 skillsmp；这些是发现候选，不代表质量认证。
+- **模型榜与重置日历**：查看可用的模型榜单以及 AIHOT 重置日历记录。资讯等 AIHOT 内容会缓存在本地，页面显示更新时间供判断内容新旧。
+- **主题与状态颜色**：可切换亮色和暗色主题；亮色主题下告警、冲突状态也使用更清晰的颜色区分。
 - **收编 / 备份本地 skill**：把同步目录里手写、未纳管的真身 skill 移入受管存储并原位软链，成为可跨 harness 复用的来源。可选扫描插件目录并以**复制导入**方式收编（不改动插件原件）。
 - **OS 垃圾自动忽略**：镜像同步把 `.DS_Store`、`._*`、`Thumbs.db`、编辑器 swap、`node_modules`、`__pycache__` 等写入各镜像 `.git/info/exclude`（本地忽略、不推上游），不会被当改动误传。
 - **自动同步本地改动**：你可能在工具外直接增删 / 改动本地 skill 文件。打开期间每 15 秒后台静默探测磁盘指纹，仅在确有变化时刷新（无变化绝不重绘，空闲无感、不闪烁不跳滚动条）；打开弹窗 / 输入时与标签页不可见时暂停，切回标签页或窗口聚焦时立即探测。右上角「↻ 同步本地」按钮可随时手动重扫。
@@ -58,7 +63,7 @@
 
 仓库 URL 支持 `https://…`、`ssh://…`，以及 scp 式 `git@host:org/repo.git`；出于安全拒绝明文 `http://`、本地 `file://` 和 `ext::`（git 的任意命令传输）。
 
-机器上必须装有 **git 且在 PATH 中**（缺失时 UI 顶部会红条提示、无法同步）。自动更新在后台**非交互**运行——设了 `GIT_TERMINAL_PROMPT=0`、`ssh -o BatchMode=yes`、`GCM_INTERACTIVE=never`，**绝不弹窗或卡住**；因此私有仓必须预先配好免交互鉴权。
+运行 **Web/headless 版本**需要机器上安装 **git 并加入 PATH**（缺失时 UI 顶部会红条提示、无法同步）；macOS 和 Windows 桌面包自带便携 Git。自动更新在后台**非交互**运行——设了 `GIT_TERMINAL_PROMPT=0`、`ssh -o BatchMode=yes`、`GCM_INTERACTIVE=never`，**绝不弹窗或卡住**；因此私有仓必须预先配好免交互鉴权。
 
 - **公开仓**：用 `https` 直接添加，无需任何配置。
 - **私有仓 · SSH（推荐）**：配好该 git 主机的 SSH key 并加入 `ssh-agent`（带 passphrase 的 key 需先解锁），公钥登记到 git 服务器。

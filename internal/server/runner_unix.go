@@ -7,10 +7,12 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+
+	"skillmanage/internal/toolchain"
 )
 
-// defaultSkillsRunner runs npx directly on Unix — npx is a real executable on
-// PATH and there is no console window to suppress.
+// defaultSkillsRunner uses the shared toolchain adapter. Without an activated
+// bundle it runs npx directly on Unix; a bundle routes through its local Node.
 func defaultSkillsRunner() skillsRunner { return unixRunner{} }
 
 type unixRunner struct{}
@@ -21,7 +23,7 @@ func (unixRunner) UpdateSkill(ctx context.Context, npxPath, name string) (string
 	// -g --yes: target the global ~/.agents/skills (our canonical) and skip the
 	// interactive scope prompt — the daemon has no tty, so without --yes the
 	// command would block on the prompt until timeout.
-	cmd := exec.CommandContext(ctx, npxPath, "skills", "update", name, "-g", "--yes")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "update", name, "-g", "--yes")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -33,7 +35,7 @@ func (unixRunner) UpdateSkill(ctx context.Context, npxPath, name string) (string
 // non-interactive flags as SkillsAdd; repoURL/skill are allowlist-validated by the
 // caller, discrete argv (no shell).
 func (unixRunner) SkillsAddURL(ctx context.Context, npxPath, repoURL, skill string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, npxPath, "skills", "add", repoURL, "--skill", skill, "-g", "-y", "-a", "universal")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "add", repoURL, "--skill", skill, "-g", "-y", "-a", "universal")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -69,7 +71,7 @@ func (unixRunner) SkillsMpFind(ctx context.Context, url, apiKey string) (string,
 // UpdateAll runs `npx skills update -g --yes` (no skill argument → every global
 // skill skills.sh manages). --yes is mandatory: the daemon is non-interactive.
 func (unixRunner) UpdateAll(ctx context.Context, npxPath string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, npxPath, "skills", "update", "-g", "--yes")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "update", "-g", "--yes")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -113,7 +115,7 @@ func (unixRunner) ListMarketplaces(ctx context.Context, cliPath string) (string,
 // query is allowlist-guarded by the caller (rejected if empty or leading "-",
 // which the CLI would parse as a flag); discrete argv, never a shell.
 func (unixRunner) SkillsFind(ctx context.Context, npxPath, query string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, npxPath, "skills", "find", query)
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "find", query)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -133,7 +135,7 @@ func (unixRunner) SkillsFind(ctx context.Context, npxPath, query string) (string
 //
 // pkg is allowlist-validated by the caller (owner/repo@skill form).
 func (unixRunner) SkillsAdd(ctx context.Context, npxPath, pkg string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, npxPath, "skills", "add", pkg, "-g", "-y", "-a", "universal")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "add", pkg, "-g", "-y", "-a", "universal")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -146,7 +148,38 @@ func (unixRunner) SkillsAdd(ctx context.Context, npxPath, pkg string) (string, s
 // is rejected as "Invalid agents".) SkillManage's own manifest-owned links are torn
 // down separately by the caller (reconcile) before this runs. name caller-validated.
 func (unixRunner) SkillsRemove(ctx context.Context, npxPath, name string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, npxPath, "skills", "remove", name, "-g", "-y")
+	cmd := toolchain.NpxCommand(ctx, npxPath, "skills", "remove", name, "-g", "-y")
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+// --- SkillHub (npx @astron-team/skillhub) ---
+// `-y` lets npx auto-fetch the CLI package non-interactively (daemon has no tty).
+// No registry/token: SkillManager only DOWNLOADS from the CLI's built-in public
+// registry (anonymous). query/slug caller-validated; discrete argv, never a shell.
+
+func (unixRunner) SkillHubSearch(ctx context.Context, npxPath, query string) (string, string, error) {
+	cmd := toolchain.NpxCommand(ctx, npxPath, "-y", "@astron-team/skillhub", "search", query, "--json")
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+// SkillHubInstall installs INTO our managed store (--dir), not an agent dir, so
+// the @skillhub namespace links from it. --force overwrites for idempotent re-pull.
+func (unixRunner) SkillHubInstall(ctx context.Context, npxPath, slug, dir string) (string, string, error) {
+	cmd := toolchain.NpxCommand(ctx, npxPath, "-y", "@astron-team/skillhub", "install", slug, "--dir", dir, "--force", "--json")
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+func (unixRunner) SkillHubRemove(ctx context.Context, npxPath, slug, dir string) (string, string, error) {
+	cmd := toolchain.NpxCommand(ctx, npxPath, "-y", "@astron-team/skillhub", "remove", slug, "--dir", dir, "--json")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
