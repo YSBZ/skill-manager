@@ -274,7 +274,7 @@ func TestAddRepoRejectsNameCollision(t *testing.T) {
 	}
 	// distinct URL, same last segment → same on-disk dir → must be rejected
 	w = httptest.NewRecorder()
-	h.ServeHTTP(w, req("POST", "/api/repos", s.token, repoReq{URL: "git@gitlab.com:teamB/skills.git"}))
+	h.ServeHTTP(w, req("POST", "/api/repos", s.token, repoReq{URL: "git@git.example.com:teamB/skills.git"}))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("colliding add: got %d, want 409", w.Code)
 	}
@@ -290,7 +290,7 @@ func TestImportRejectsNameCollision(t *testing.T) {
 	// two valid URLs whose names both derive to "skills" → batch-internal collision
 	body := importReq{Repos: []repoReq{
 		{URL: "git@github.com:teamA/skills.git"},
-		{URL: "git@gitlab.com:teamB/skills.git"},
+		{URL: "git@git.example.com:teamB/skills.git"},
 	}}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req("POST", "/api/repos/import", s.token, body))

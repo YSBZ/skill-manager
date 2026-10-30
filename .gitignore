@@ -9,7 +9,7 @@
 /.skillmanage/
 *.log
 .DS_Store
-# company-private online-update values (feed URL + read-only token); injected at
+# Local online-update values (feed URL + optional read-only token); injected at
 # build time via ldflags, NEVER committed. Public builds omit it → update disabled.
 /build/update.local
 # local visual brainstorming sessions (includes preview session keys)

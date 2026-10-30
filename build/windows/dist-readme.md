@@ -29,7 +29,7 @@ WebView2 已包含在 Windows 11 中，也已安装在大多数 Windows 10 设�
 - 右上角「同步本地」重新扫描本地技能，Git 仓库也可在来源区域更新。
 - 配置与缓存保存在 `%USERPROFILE%\.skillmanage\`，不随压缩包分发。
 - App 内含运行所需服务，双击即可打开，无需手动启动服务。联网浏览不要求安装 Node；执行 Skill 安装等 Node 操作要求本机 Node.js 22.20.0 或更新版本。缺少或过旧时，仅在相关操作中提示官方下载页。
-- 从 v1.0.0 build63 升级时，旧 Windows 更新器只替换 exe，无法安装新版所需的 `runtime` 文件夹；请退出旧版、下载并完整解压 v1.1.0 build64 ZIP，保留完整目录。GitHub 旧版 v6.0.x 也不能自动识别此次跨版本号变化，请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动下载完整 ZIP 安装一次。之后使用新版应用内提示更新。
+- GitHub 旧版 v6.0.x 没有递增构建号，无法自动识别此次跨版本号变化；请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动安装 v1.1.0 build64 一次。旧 Windows 更新器只替换 exe，不能安装新版所需的 `runtime` 文件夹；请退出旧版、下载并完整解压 ZIP，保留整个目录。之后使用新版应用内提示更新；新版会在后续更新中一并替换 exe 和 runtime。
 
 ## 升级与卸载
 

@@ -1,35 +1,17 @@
-# Company-private online-update config — COPY to build/update.local (gitignored)
-# on the build machine to enable the desktop self-update against the company
-# GitLab. A public build omits build/update.local → the update check is disabled
-# and NO company info enters the binary or the repo.
+# Optional local overrides for release builds. This file is only a template;
+# copy it to the ignored build/update.local file before changing these values.
 #
-#   cp build/update.local.example build/update.local   # then fill in, on the build machine only
+# The public source defaults to the anonymous GitHub feed in the Makefile.
+# Keep UPDATE_TOKEN empty when the feed and release assets are public.
 #
-# Makefile `-include`s build/update.local and injects these via linker flags into
-# both the web and desktop binaries. UPDATE_TOKEN is optional: leave it empty when
-# the feed and package URLs are anonymous. See docs/plans/phase6-online-update.md.
+# Makefile `-include`s this local file and injects these values into the binary.
 
-# Mandatory URL of the feed's latest.json on the company GitLab (raw file or release
-# asset) for a private release build. The app GETs it with UPDATE_TOKEN below only
-# when the endpoint requires authentication.
-UPDATE_FEED = https://<your-gitlab-host>/<group>/skill-manager/-/raw/main/release/latest.json
+UPDATE_FEED = https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json
 
-# Optional read-only GitLab Deploy Token scoped to this project (read_repository /
-# read_package_registry). Use it only when the feed or package URLs require auth;
-# it is baked into the private binary, never committed. For anonymous package/feed
-# endpoints, this MUST be empty (UPDATE_TOKEN =).
+# Optional read-only token, used only if a custom feed requires authentication.
 UPDATE_TOKEN =
 
-# 意见收集出口（可选）。填了才在该构建里启用「意见反馈」入口。
-# FEEDBACK_ENDPOINT: GitLab 通用包基址；提交会 PUT 到 <此地址>/<version>/feedback.zip
-FEEDBACK_ENDPOINT = https://<your-gitlab-host>/api/v4/projects/<id>/packages/generic/feedback
-# FEEDBACK_TOKEN: 作用域【仅 write_package_registry】的 Deploy Token。低权限、可吊销、
-# 只烘进私有二进制、绝不提交。泄露最坏也只能往包仓传垃圾包，动不了代码/分支/issue。
-FEEDBACK_TOKEN = <write_package_registry-deploy-token>
-
-# Optional shared AI/Skills content service origin. Leave empty to disable remote
-# content while keeping local skill management available. This URL is baked into
-# web and desktop client builds; SKILLMANAGER_CONTENT_URL overrides it at runtime.
-# Do not add credentials or tokens to this URL. Keep private service origins only
-# in the ignored build/update.local file on the build machine.
+# Optional services; leave blank to disable them in this build.
+FEEDBACK_ENDPOINT =
+FEEDBACK_TOKEN =
 CONTENT_SERVICE_URL =

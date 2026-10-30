@@ -221,7 +221,7 @@ type Server struct {
 	// Empty → anonymous skillsmp search (lower quota). Guarded by mu.
 	skillsmpKey string
 
-	// online-update check cache (phase 6, guarded by mu): the company-private
+	// online-update check cache (guarded by mu): the configured feed
 	// update feed is polled at most once per updateCheckTTL; results in between
 	// are served from this cache. Empty until the first successful check.
 	updateCache map[string]any

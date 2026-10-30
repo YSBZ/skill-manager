@@ -16,10 +16,9 @@ import (
 	"time"
 )
 
-// FeedbackEndpoint / FeedbackToken 是公司私有的意见收集出口：GitLab 通用包的基址
-// (如 .../packages/generic/feedback) 和一个作用域仅 write_package_registry 的
-// Deploy Token。构建时从 gitignored 的 build/update.local 经 -X main.feedbackEndpoint
-// / -X main.feedbackToken 注入；公开构建为空 → 反馈禁用，二进制不含公司信息。
+// FeedbackEndpoint and FeedbackToken configure optional feedback collection.
+// They are supplied through the ignored local build configuration; leaving both
+// unset disables feedback collection in the resulting binary.
 var (
 	FeedbackEndpoint string
 	FeedbackToken    string
@@ -99,7 +98,7 @@ func buildFeedbackZip(text string, imgs []feedbackImage, meta feedbackMeta) ([]b
 	return buf.Bytes(), nil
 }
 
-// uploadFeedback 把 zip PUT 到 GitLab 通用包仓的 version 下，用 Deploy Token 鉴权。
+// uploadFeedback 把 zip PUT 到 configured service 通用包仓的 version 下，用 access token 鉴权。
 func uploadFeedback(ctx context.Context, zipBytes []byte, version string) error {
 	url := strings.TrimRight(FeedbackEndpoint, "/") + "/" + version + "/feedback.zip"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(zipBytes))
@@ -121,7 +120,7 @@ func uploadFeedback(ctx context.Context, zipBytes []byte, version string) error 
 }
 
 // handleFeedback 接收一条匿名意见（multipart：text + 至多 feedbackMaxImages 个 images
-// 文件），打包并上传到 GitLab 包仓。提交不带用户名/机器名——只带 app 版本、OS、时间。
+// 文件），打包并上传到 configured service 包仓。提交不带用户名/机器名——只带 app 版本、OS、时间。
 // 未配置出口时禁用（501）。
 func (s *Server) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	if !originGuard(w, r) { // CSRF: reject cross-origin POSTs (defense-in-depth beyond Bearer)

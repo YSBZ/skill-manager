@@ -8,7 +8,7 @@ func TestSkillsMpRepoRoot(t *testing.T) {
 		"https://github.com/rowankid/ai-team":     "https://github.com/rowankid/ai-team",
 		"https://github.com/owner/repo.git":       "https://github.com/owner/repo",
 		"https://github.com/owner/repo/tree/main": "https://github.com/owner/repo",
-		"https://gitlab.com/owner/repo":           "", // not github → not installable
+		"https://git.example.com/owner/repo":           "", // not github → not installable
 		"https://example.com/x":                   "",
 		"":                                        "",
 	}
@@ -24,7 +24,7 @@ func TestParseSkillsMp(t *testing.T) {
 	body := []byte(`{"success":true,"data":{"skills":[
 		{"name":"react-core","author":"jasonkneen","description":"d1","githubUrl":"https://github.com/jasonkneen/CopilotKit/tree/main/packages/react-core/skills/react-core","skillUrl":"https://skillsmp.com/x","stars":12},
 		{"name":"weekly-report","author":"rowankid","description":"d2","githubUrl":"https://github.com/rowankid/ai-team","skillUrl":"https://skillsmp.com/y","stars":3},
-		{"name":"no-repo","githubUrl":"https://gitlab.com/a/b","skillUrl":"z"},
+		{"name":"no-repo","githubUrl":"https://git.example.com/a/b","skillUrl":"z"},
 		{"name":"","githubUrl":"https://github.com/a/b"}
 	]}}`)
 	got := parseSkillsMp(body)

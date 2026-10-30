@@ -12,14 +12,14 @@
 
 ### 桌面 app（macOS / Windows）
 
-从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 下载对应平台的桌面包，无需自行构建。
+从 [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest)下载 v1.1.0 对应平台的桌面包，无需自行构建。
 
-- **macOS**：推荐下载 `SkillManager-vX.Y.Z.dmg`，双击打开后把 `SkillManager.app` 拖到窗口里的 `Applications` 快捷方式再启动（装进 `/Applications` 还能避开 App Translocation）；也可用 `SkillManager-desktop-macos-vX.Y.Z.zip`，解压后手动拖进 `/Applications`。
-- **Windows**：`SkillManager-desktop-windows-vX.Y.Z.zip`，解压后运行 `SkillManager.exe`（已嵌入应用图标，双击无控制台窗口）。
+- **macOS**：下载 `SkillManager-desktop-macos-v1.1.0.zip` 通用包，支持 Apple 芯片与 Intel。完整解压后双击 `SkillManager.app`，也可拖进「应用程序」。本次提供 ZIP 安装包。
+- **Windows**：下载并完整解压 `SkillManager-desktop-windows-v1.1.0.zip`，保留整个目录，再运行 `SkillManager.exe`（已嵌入应用图标，双击无控制台窗口）。
 
 > **macOS 注意**：安装包使用本地 ad-hoc 签名，未经 Apple 公证。首次打开时 Gatekeeper 可能拦截；请先确认下载来源，再按「隐私与安全性」中的系统提示操作。Apple 的说明见[此处](https://support.apple.com/en-us/102445)。
 
-> **v1.1.0 build64 升级说明**：GitLab 的 macOS v1.0.0 build63 可以在应用内更新。Windows 旧版更新器只替换 exe；升级时请下载并完整解压 v1.1.0 ZIP，保留 `runtime` 文件夹。GitHub 旧版 v6.0.x 没有用于跨版本比较的递增构建号，因此不会自动识别到 1.x；请从 GitHub Releases 手动安装一次 v1.1.0。后续更新按应用内提示进行。详见 [CHANGELOG.md](CHANGELOG.md)。
+> **v1.1.0 build64 升级说明**：GitHub 旧版 v6.0.x 没有用于跨版本比较的递增构建号，因此不会自动识别到 1.x；请从 GitHub Releases 手动安装一次 v1.1.0。Windows 旧版更新器只替换 exe；Windows 升级时须完整解压 ZIP 并保留 `runtime` 文件夹。安装 v1.1.0 后，后续更新按应用内提示进行。详见 [CHANGELOG.md](CHANGELOG.md)。
 
 - 中央文件夹默认 `~/.skillmanage`（含 config.yaml、manifest.yaml、local 受管存储、lock、address、token）；首次启动自动创建。
 - 在应用窗口里管理一切；标题旁的 `?` 有完整使用指南，更新日志在版本号弹层里。
@@ -96,4 +96,4 @@ UI 是手写静态资源、`//go:embed` 进二进制，无前端构建链。WSL 
 
 ## 文档
 
-设计与实施细节见 `docs/plans/`。
+版本更新内容见 [CHANGELOG.md](CHANGELOG.md)，使用说明见应用内指南。

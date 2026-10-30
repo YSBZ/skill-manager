@@ -189,7 +189,7 @@ func multipartImages(t *testing.T, text string, images []fbImg) (*bytes.Buffer, 
 	return &buf, mw.FormDataContentType()
 }
 
-// TestHandleFeedbackUploadFailure verifies a non-2xx from GitLab becomes a 502
+// TestHandleFeedbackUploadFailure verifies a non-2xx from configured service becomes a 502
 // with the generic message — the "never silently drop" guarantee.
 func TestHandleFeedbackUploadFailure(t *testing.T) {
 	s := newTestServer(t)

@@ -8,7 +8,7 @@ func TestValidateRepoURL(t *testing.T) {
 		"ssh://git@example.com/team/skills.git",
 		"git://example.com/team/skills.git",
 		"git@github.com:team/skills.git",
-		"git@gitlab.internal:group/sub/skills.git",
+		"git@git.example.com:group/sub/skills.git",
 	}
 	for _, u := range allow {
 		if err := ValidateRepoURL(u); err != nil {

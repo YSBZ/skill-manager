@@ -20,9 +20,10 @@ and each Git distribution's own license directory is preserved during extraction
 - Windows uses the Git for Windows MinGit 2.56.0.4 distribution inside Dugite Native.
   Preserve `git/LICENSE.txt`, `git/usr/share/licenses`,
   `git/ucrt64/share/licenses`, and the other bundled notice files without pruning.
-- Git LFS 3.8.1 and Git Credential Manager 2.9.1: MIT. The Dugite Native runtime
-  archive includes their executable files; copies of their upstream license texts
-  are retained in this directory.
+- Git LFS 3.8.1 and Git Credential Manager 2.9.1: MIT. The upstream archive includes
+  both. macOS staging omits the optional .NET credential GUI and uses the app's
+  HTTPS askpass credentials or existing SSH setup; Git and Git LFS remain bundled.
+  Windows keeps Git Credential Manager. Their upstream license texts are retained.
 
 ## Skills CLI
 

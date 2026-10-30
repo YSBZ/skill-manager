@@ -404,6 +404,10 @@ func (s *Syncer) runEnv(ctx context.Context, dir string, extraEnv []string, args
 	}
 	full := append([]string{"-c", "core.hooksPath=" + s.hooksDir}, args...)
 	cmd := exec.CommandContext(ctx, s.git, full...)
+	// Descendants such as ssh or a credential helper can retain inherited
+	// output pipes after git is killed. Bound their drain so the command's
+	// context deadline also bounds our wait for stdout/stderr.
+	cmd.WaitDelay = time.Second
 	hideConsole(cmd) // Windows: suppress the flashing console window (no-op elsewhere)
 	if dir != "" {
 		cmd.Dir = dir

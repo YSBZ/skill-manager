@@ -35,18 +35,27 @@ jobs:
           go test ./...
           go vet ./...
           node --test internal/server/dist/*.test.js
-          make desktop-dist desktop-dmg UPDATE_FEED=https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json UPDATE_TOKEN= FEEDBACK_ENDPOINT= FEEDBACK_TOKEN= CONTENT_SERVICE_URL=
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          make -o winres desktop-dist desktop-win UPDATE_FEED=https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json UPDATE_TOKEN= FEEDBACK_ENDPOINT= FEEDBACK_TOKEN= CONTENT_SERVICE_URL=
           codesign --verify --deep --strict dist/SkillManager.app
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib, json, plistlib, zipfile
+          import hashlib, json, plistlib, re, zipfile
           p = plistlib.loads(Path('dist/SkillManager.app/Contents/Info.plist').read_bytes())
           assert p['CFBundleShortVersionString'] == '1.1.0' and p['CFBundleVersion'] == '64'
+          app_binary = Path('dist/SkillManager.app/Contents/MacOS/skillmanager-desktop').read_bytes()
+          assert b'https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json' in app_binary
+          assert not re.search(rb'/Users/[^/]+/workspace/', app_binary)
           assets = []
-          for path in (Path('dist/pkg/SkillManager-desktop-macos-v1.1.0.zip'), Path('dist/SkillManager-v1.1.0.dmg')):
+          for path in (Path('dist/pkg/SkillManager-desktop-macos-v1.1.0.zip'), Path('dist/pkg/SkillManager-desktop-windows-v1.1.0.zip')):
               if path.suffix == '.zip':
                   with zipfile.ZipFile(path) as z:
                       assert z.testzip() is None
+                      if 'windows' in path.name:
+                          binary_name = next(n.filename for n in z.infolist() if n.filename.endswith('/SkillManager.exe'))
+                          binary = z.read(binary_name)
+                          assert b'https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json' in binary
+                          assert not re.search(rb'/Users/[^/]+/workspace/', binary)
                       assert not any(Path(n.filename).name in ('node', 'node.exe', 'content.db', 'credentials.yaml', 'token') for n in z.infolist() if not n.is_dir())
               with path.open('rb') as f:
                   digest = hashlib.file_digest(f, 'sha256').hexdigest()
@@ -59,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          gh release upload "$RELEASE_TAG" --clobber dist/pkg/SkillManager-desktop-macos-v1.1.0.zip dist/SkillManager-v1.1.0.dmg dist/macos-assets.json
+          gh release upload "$RELEASE_TAG" --clobber dist/pkg/SkillManager-desktop-macos-v1.1.0.zip dist/pkg/SkillManager-desktop-windows-v1.1.0.zip dist/macos-assets.json
 
   windows-sources:
     runs-on: ubuntu-24.04
@@ -74,12 +83,13 @@ jobs:
           mkdir -p source-assets
           curl --fail --location --retry 3 --max-time 120 https://raw.githubusercontent.com/msys2/MSYS2-keyring/5d249077a0cfeec9dbf51515e5e01da413d28859/msys2.gpg --output source-assets/msys2.gpg
           echo '1257d4ccc536c53333445a618039af4c3ea3f56b96601de9af89151ea529c19a  source-assets/msys2.gpg' | sha256sum --check
+          gpg --batch --yes --dearmor --output source-assets/msys2-binary.gpg source-assets/msys2.gpg
           for spec in 'mingw:mingw-w64-gcc-16.2.0-6.src.tar.zst' 'msys:msys2-runtime-3.6.10-4.src.tar.zst'; do
             repo="${spec%%:*}"
             file="${spec#*:}"
             curl --fail --location --retry 3 --max-time 600 "https://repo.msys2.org/$repo/sources/$file" --output "source-assets/$file"
             curl --fail --location --retry 3 --max-time 120 "https://repo.msys2.org/$repo/sources/$file.sig" --output "source-assets/$file.sig"
-            gpgv --keyring "$PWD/source-assets/msys2.gpg" "source-assets/$file.sig" "source-assets/$file"
+            gpgv --keyring "$PWD/source-assets/msys2-binary.gpg" "source-assets/$file.sig" "source-assets/$file"
             zstd --test "source-assets/$file"
             tar --zstd -tf "source-assets/$file" > "source-assets/$file.contents.txt"
             srcinfo="$(python3 -c 'import pathlib,sys; print(next(n for n in pathlib.Path(sys.argv[1]).read_text().splitlines() if n.endswith("/.SRCINFO") or n == ".SRCINFO"))' "source-assets/$file.contents.txt")"
@@ -105,4 +115,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          gh release upload "$RELEASE_TAG" --clobber source-assets/*.src.tar.zst source-assets/*.SRCINFO source-assets/windows-source-assets.json
+          gh release upload "$RELEASE_TAG" --clobber source-assets/*.src.tar.zst source-assets/*.src.tar.zst.sig source-assets/*.SRCINFO source-assets/windows-source-assets.json

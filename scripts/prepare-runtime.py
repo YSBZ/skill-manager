@@ -191,6 +191,55 @@ def extract(component, platform, cache_dir, destination):
         raise PrepareError("unsupported archive type: " + archive_type)
 
 
+def trim_optional_mac_gcm(git_root):
+    """Keep Git/LFS and app askpass auth; omit the optional macOS .NET GUI helper."""
+    core = git_root / "libexec" / "git-core"
+    metadata = core / "git-credential-manager.deps.json"
+    if not metadata.exists():
+        return
+    dependencies = json.loads(metadata.read_text(encoding="utf-8"))
+    names = set()
+    for libraries in dependencies.get("targets", {}).values():
+        for attributes in libraries.values():
+            for category in ("runtime", "native", "resources", "runtimeTargets"):
+                names.update(PurePosixPath(name).name for name in attributes.get(category, {}))
+    if not names:
+        raise PrepareError("macOS credential manager dependency map is empty")
+    if any(name == "git" or (name.startswith("git-") and not name.startswith("git-credential-manager")) for name in names):
+        raise PrepareError("optional credential payload references a required Git helper")
+    removed = 0
+    for path in core.iterdir():
+        if (path.is_file() or path.is_symlink()) and (path.name in names or path.name.startswith("git-credential-manager")):
+            removed += path.lstat().st_size
+            path.unlink()
+    print("Omitted optional macOS credential GUI payload:", removed, "bytes")
+
+
+def deduplicate_mac_git_aliases(git_root):
+    # Upstream Git installs these aliases as identical executables. ZIP cannot
+    # preserve hardlinks, but relative symlinks preserve the same argv[0] use.
+    for name in ("git", "scalar"):
+        canonical = git_root / "bin" / name
+        alias = git_root / "libexec" / "git-core" / name
+        if canonical.is_file() and alias.is_file() and not alias.is_symlink():
+            if sha256(canonical) == sha256(alias):
+                alias.unlink()
+                alias.symlink_to("../../bin/" + name)
+
+
+def trim_mac_desktop_extras(stage):
+    # The desktop calls Git/LFS and npm exec, never Scalar or npm's terminal
+    # manual. Preserve all executable dependencies and license/notice files.
+    for relative in ("git/bin/scalar", "git/libexec/git-core/scalar"):
+        path = stage / relative
+        if path.exists() or path.is_symlink():
+            path.unlink()
+    for relative in ("npm/docs", "npm/man"):
+        path = stage / relative
+        if path.is_dir():
+            shutil.rmtree(path)
+
+
 def npm_directory(node_distribution, platform):
     if platform.startswith("darwin-"):
         return node_distribution / "lib" / "node_modules" / "npm"
@@ -363,7 +412,12 @@ def prepare(platform, output_dir, cache_dir):
         node_distribution = Path(temp) / "node-build-input"
         extract(lock["node"], platform, cache_dir, node_distribution)
         extract(lock["git"], platform, cache_dir, stage / "git")
+        if platform.startswith("darwin-"):
+            trim_optional_mac_gcm(stage / "git")
+            deduplicate_mac_git_aliases(stage / "git")
         copy_npm(node_distribution, platform, stage)
+        if platform.startswith("darwin-"):
+            trim_mac_desktop_extras(stage)
         copy_cli(stage)
         make_manifest(stage, platform, lock)
         copy_notices(stage, node_distribution)

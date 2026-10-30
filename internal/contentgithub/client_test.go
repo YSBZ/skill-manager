@@ -178,8 +178,8 @@ func TestGetJSONDoesNotFollowOffOriginRedirect(t *testing.T) {
 }
 
 func TestGetJSONSanitizesRateLimitErrorAndPauses(t *testing.T) {
-	const token = "top-secret-token"
-	const bodySecret = "private response body"
+	const token = "test-github-token-fixture"
+	const bodySecret = "test-response-secret-fixture"
 	var hit atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit.Add(1)

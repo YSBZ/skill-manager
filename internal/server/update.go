@@ -11,19 +11,16 @@ import (
 	"time"
 )
 
-// UpdateFeed / UpdateToken are the COMPANY-PRIVATE online-update feed URL and its
-// read-only token, set by main (web + desktop) from build-injected ldflags
-// (-X main.updateFeed / -X main.updateToken, sourced from the gitignored
-// build/update.local). They are NEVER committed: a public build leaves them
-// empty, which disables the update check and keeps the binary free of company
-// info. See docs/plans/phase6-online-update.md.
+// UpdateFeed / UpdateToken are the online-update feed URL and its optional
+// read-only token, set at build time. Public release builds use their configured
+// public feed; local builds can override it through ignored build configuration.
 var (
 	UpdateFeed  string
 	UpdateToken string
 )
 
 // updateCheckTTL bounds how often the feed is polled — the UI may query the
-// endpoint on every load/focus, but the company GitLab is hit at most this often.
+// endpoint on each load/focus, but the configured feed is polled at most this often.
 const updateCheckTTL = time.Hour
 
 // latestManifest is the shape of the feed's latest.json.
@@ -36,9 +33,8 @@ type latestManifest struct {
 }
 
 // handleUpdateCheck reports whether a newer release is available, per the
-// company-private feed. Disabled (and silent) when no feed is built in — so the
-// public build never reaches out and exposes nothing. Network failures (e.g. off
-// the company VPN) degrade to "no newer version", never an error banner.
+// configured feed. Disabled silently when no feed is built in. Network failures
+// degrade to "no newer version", never an error banner.
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if UpdateFeed == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
@@ -57,10 +53,10 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	m, err := fetchLatestManifest(ctx, UpdateFeed, UpdateToken)
 	if err != nil {
-		// Internal GitLab unreachable / not on VPN → degrade quietly, do not cache.
+		// An unavailable update feed degrades quietly; do not cache the failure.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"enabled": true, "newer": false, "current": Version,
-			"error": "查询更新失败（可能不在公司网络）",
+			"error": "更新源暂时不可用，请检查网络连接。",
 		})
 		return
 	}
@@ -80,8 +76,8 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// fetchLatestManifest GETs the feed's latest.json (GitLab raw/release asset),
-// authenticating with the read-only token via the PRIVATE-TOKEN header.
+// fetchLatestManifest GETs the feed's latest.json (configured service raw/release asset),
+// authenticating with the read-only token via the feed token header header.
 func fetchLatestManifest(ctx context.Context, feed, token string) (*latestManifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)
 	if err != nil {

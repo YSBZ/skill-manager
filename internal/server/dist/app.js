@@ -3897,7 +3897,7 @@ $("#seg-presets").onclick = () => setAsideTab("presets");
 load(true).then(() => checkUpdates());
 setInterval(() => checkUpdates(), 60 * 60 * 1000);
 
-// App self-update check (phase 6): ask the company-private feed whether a newer
+// App self-update check: ask the configured feed whether a newer
 // SkillManager release exists and, if so, show a sticky notice. Disabled builds
 // (no feed) return {enabled:false} → no-op, no banner, no network. Checked on
 // entry + hourly + on window focus.
@@ -3916,7 +3916,7 @@ async function checkAppUpdate() {
       } else {
         // web build / unsupported → just notify (manual download)
         if (btn) btn.classList.add("hidden");
-        banner("SkillManager 有新版本 v" + d.latest + "（当前 v" + d.current + "）" + (d.notes ? "：" + d.notes : "") + "　·　请到公司 GitLab 下载更新", false, true);
+        banner("SkillManager 有新版本 v" + d.latest + "（当前 v" + d.current + "）" + (d.notes ? "：" + d.notes : "") + "　·　请前往 GitHub Releases 下载更新", false, true);
       }
     } else if (btn) {
       btn.classList.add("hidden");

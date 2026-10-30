@@ -323,7 +323,7 @@ func TestRepoNameCollides(t *testing.T) {
 		"https://example.com/group/ops-skills.git",
 	}
 	// Different host/path but identical last segment → same on-disk dir.
-	if !RepoNameCollides(existing, "git@gitlab.com:teamB/skills.git") {
+	if !RepoNameCollides(existing, "git@git.example.com:teamB/skills.git") {
 		t.Error("expected collision: teamB/skills maps to the same dir as teamA/skills")
 	}
 	// Identical URL is the ordinary duplicate case, not a collision.

@@ -8,11 +8,8 @@ GUIDE   := docs/dist-readme.md
 # below so their -X values expand to the real values (:= is immediate).
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/macos/Info.plist 2>/dev/null)
 RELEASE_CODE := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/macos/Info.plist 2>/dev/null)
-# Company-private online-update values (mandatory feed URL + optional read-only token),
-# injected at build time and NEVER committed: build/update.local is gitignored. Leave
-# UPDATE_TOKEN empty when feed/package URLs are anonymous. A public build (file absent)
-# leaves UPDATE_FEED/UPDATE_TOKEN empty → update check disabled, no company info in the
-# binary. See docs/plans/phase6-online-update.md.
+# Public builds use the GitHub release feed. A local ignored build/update.local file
+# may override it for a private build; keep any tokens out of the source tree.
 UPDATE_FEED ?= https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json
 -include build/update.local
 UPDATE_LDFLAGS := -X main.updateFeed=$(UPDATE_FEED) -X main.updateToken=$(UPDATE_TOKEN) -X main.releaseCode=$(RELEASE_CODE)
@@ -141,7 +138,7 @@ desktop-dmg: desktop-app
 	@cp -R "$(DIST)/$(DESKTOP_APP)" "$(DIST)/dmg/"
 	@cp build/macos/dist-readme.md "$(DIST)/dmg/安装说明.md"
 	@ln -s /Applications "$(DIST)/dmg/Applications"
-	@hdiutil create -volname "SkillManager $(VERSION)" -srcfolder "$(DIST)/dmg" -ov -format UDZO "$(DIST)/SkillManager-v$(VERSION).dmg" >/dev/null
+	@hdiutil create -volname "SkillManager $(VERSION)" -srcfolder "$(DIST)/dmg" -ov -format ULMO "$(DIST)/SkillManager-v$(VERSION).dmg" >/dev/null
 	@rm -rf "$(DIST)/dmg"
 	@echo "built $(DIST)/SkillManager-v$(VERSION).dmg"
 

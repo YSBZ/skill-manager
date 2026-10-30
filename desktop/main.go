@@ -77,9 +77,8 @@ func getAppCtx() context.Context    { appCtxMu.Lock(); defer appCtxMu.Unlock(); 
 // port if it's taken, and the CLI reads the resolved address from the address file.
 const cliAPIPort = 7799
 
-// updateFeed / updateToken: company-private online-update feed + read-only token,
-// injected at build time from the gitignored build/update.local. Empty in public
-// builds → update check disabled, no company info in the binary.
+// updateFeed / updateToken are the update feed URL and optional read-only token,
+// injected at build time. Public release builds configure the public feed.
 var (
 	updateFeed  = ""
 	updateToken = ""

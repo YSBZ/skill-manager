@@ -35,11 +35,9 @@ const defaultPort = 7799
 // it "dev".
 var version = "dev"
 
-// updateFeed / updateToken are the COMPANY-PRIVATE online-update feed URL and its
-// read-only token, injected at build time from the gitignored build/update.local
-// (-X main.updateFeed=… -X main.updateToken=…). They are NEVER committed: a public
-// build leaves them empty, which disables the update check entirely and keeps the
-// binary free of any company info. See docs/plans/phase6-online-update.md.
+// updateFeed / updateToken are the update feed URL and optional read-only token,
+// injected at build time. Public release builds configure the public feed; local
+// builds can override it through ignored build configuration.
 var (
 	updateFeed  = ""
 	updateToken = ""
