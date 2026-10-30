@@ -26,7 +26,7 @@ jobs:
           mkdir -p source-assets
           curl --fail --location --retry 3 --max-time 120 https://raw.githubusercontent.com/msys2/MSYS2-keyring/5d249077a0cfeec9dbf51515e5e01da413d28859/msys2.gpg --output source-assets/msys2.gpg
           echo '1257d4ccc536c53333445a618039af4c3ea3f56b96601de9af89151ea529c19a  source-assets/msys2.gpg' | sha256sum --check
-          for spec in 'msys:gettext-0.22.5-1.src.tar.zst' 'msys:mpfr-4.2.2-1.src.tar.zst' 'mingw:mingw-w64-mpfr-4.2.2-1.src.tar.zst' 'mingw:mingw-w64-libidn2-2.3.8-4.src.tar.zst' 'mingw:mingw-w64-gettext-1.0-1.src.tar.zst'; do
+          for spec in 'msys:gettext-0.22.5-1.src.tar.zst' 'msys:mpfr-4.2.2-1.src.tar.zst' 'mingw:mingw-w64-mpfr-4.2.2-1.src.tar.zst' 'mingw:mingw-w64-libidn2-2.3.8-4.src.tar.zst' 'mingw:mingw-w64-gettext-1.0-1.src.tar.zst' 'msys:dash-0.5.13.5-1.src.tar.zst' 'mingw:mingw-w64-docx2txt-rs-0.2.0-1.src.tar.zst' 'mingw:mingw-w64-ca-certificates-20260816-3.src.tar.zst'; do
             repo="${spec%%:*}"
             file="${spec#*:}"
             curl --fail --location --retry 3 --max-time 600 "https://repo.msys2.org/$repo/sources/$file" --output "source-assets/$file"
@@ -41,7 +41,7 @@ jobs:
           from pathlib import Path
           import hashlib, json, re
           assets = []
-          for name, version, revision in (('gettext-0.22.5-1.src.tar.zst','0.22.5','1'),('mpfr-4.2.2-1.src.tar.zst','4.2.2','1'),('mingw-w64-mpfr-4.2.2-1.src.tar.zst','4.2.2','1'),('mingw-w64-libidn2-2.3.8-4.src.tar.zst','2.3.8','4'),('mingw-w64-gettext-1.0-1.src.tar.zst','1.0','1')):
+          for name, version, revision in (('gettext-0.22.5-1.src.tar.zst','0.22.5','1'),('mpfr-4.2.2-1.src.tar.zst','4.2.2','1'),('mingw-w64-mpfr-4.2.2-1.src.tar.zst','4.2.2','1'),('mingw-w64-libidn2-2.3.8-4.src.tar.zst','2.3.8','4'),('mingw-w64-gettext-1.0-1.src.tar.zst','1.0','1'),('dash-0.5.13.5-1.src.tar.zst','0.5.13.5','1'),('mingw-w64-docx2txt-rs-0.2.0-1.src.tar.zst','0.2.0','1'),('mingw-w64-ca-certificates-20260816-3.src.tar.zst','20260816','3')):
               path = Path('source-assets') / name
               info = Path(str(path) + '.SRCINFO').read_text()
               assert re.search(r'(?m)^\s*pkgver\s*=\s*' + re.escape(version) + r'\s*$', info)
