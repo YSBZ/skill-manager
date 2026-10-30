@@ -1,0 +1,60 @@
+name: Complete v1.1.0 source assets
+
+on:
+  push:
+    branches: [codex/release-v1.1.0]
+    paths: [.github/workflows/release-source-completion.yml]
+
+permissions:
+  contents: write
+
+env:
+  GH_REPO: YSBZ/skill-manager
+  RELEASE_TAG: v1.1.0
+
+jobs:
+  source-completion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Verify exact vendor source packages
+        run: |
+          set -euo pipefail
+          mkdir -p source-assets
+          curl --fail --location --retry 3 --max-time 120 https://raw.githubusercontent.com/msys2/MSYS2-keyring/5d249077a0cfeec9dbf51515e5e01da413d28859/msys2.gpg --output source-assets/msys2.gpg
+          echo '1257d4ccc536c53333445a618039af4c3ea3f56b96601de9af89151ea529c19a  source-assets/msys2.gpg' | sha256sum --check
+          for spec in 'msys:gettext-0.22.5-1.src.tar.zst' 'msys:mpfr-4.2.2-1.src.tar.zst' 'mingw:mingw-w64-mpfr-4.2.2-1.src.tar.zst' 'mingw:mingw-w64-libidn2-2.3.8-4.src.tar.zst' 'mingw:mingw-w64-gettext-1.0-1.src.tar.zst'; do
+            repo="${spec%%:*}"
+            file="${spec#*:}"
+            curl --fail --location --retry 3 --max-time 600 "https://repo.msys2.org/$repo/sources/$file" --output "source-assets/$file"
+            curl --fail --location --retry 3 --max-time 120 "https://repo.msys2.org/$repo/sources/$file.sig" --output "source-assets/$file.sig"
+            gpgv --keyring "$PWD/source-assets/msys2.gpg" "source-assets/$file.sig" "source-assets/$file"
+            zstd --test "source-assets/$file"
+            tar --zstd -tf "source-assets/$file" > "source-assets/$file.contents.txt"
+            srcinfo="$(python3 -c 'import pathlib,sys; print(next(n for n in pathlib.Path(sys.argv[1]).read_text().splitlines() if n.endswith("/.SRCINFO") or n == ".SRCINFO"))' "source-assets/$file.contents.txt")"
+            tar --zstd -xOf "source-assets/$file" "$srcinfo" > "source-assets/$file.SRCINFO"
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, re
+          assets = []
+          for name, version, revision in (('gettext-0.22.5-1.src.tar.zst','0.22.5','1'),('mpfr-4.2.2-1.src.tar.zst','4.2.2','1'),('mingw-w64-mpfr-4.2.2-1.src.tar.zst','4.2.2','1'),('mingw-w64-libidn2-2.3.8-4.src.tar.zst','2.3.8','4'),('mingw-w64-gettext-1.0-1.src.tar.zst','1.0','1')):
+              path = Path('source-assets') / name
+              info = Path(str(path) + '.SRCINFO').read_text()
+              assert re.search(r'(?m)^\s*pkgver\s*=\s*' + re.escape(version) + r'\s*$', info)
+              assert re.search(r'(?m)^\s*pkgrel\s*=\s*' + re.escape(revision) + r'\s*$', info)
+              with path.open('rb') as f:
+                  digest = hashlib.file_digest(f, 'sha256').hexdigest()
+              assets.append({'name':name, 'sha256':digest, 'bytes':path.stat().st_size, 'signatureVerified':True, 'archiveVerified':True})
+          Path('source-assets/windows-source-extra-assets.json').write_text(json.dumps({'keyringCommit':'5d249077a0cfeec9dbf51515e5e01da413d28859','assets':assets},indent=2) + '\n')
+          PY
+      - name: Upload verified source packages to existing draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" --clobber source-assets/*.src.tar.zst source-assets/*.SRCINFO source-assets/windows-source-extra-assets.json
