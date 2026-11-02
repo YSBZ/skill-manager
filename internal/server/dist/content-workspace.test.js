@@ -664,6 +664,78 @@ test("same-ID summary changes wait for explicit new-content acceptance", async (
   assert.equal(workspace.elements["news-update-hint"].hidden, true);
 });
 
+test("an idle stale startup list adopts the fresh feed without manual acceptance", async () => {
+  let ready = false;
+  const workspace = makeWorkspace({
+    request: async ({ url }) => url === "/api/content/status"
+      ? { sources: [], coverage: {}, notices: [] }
+      : { status: 200, data: feed([entry("news_same", ready ? "Today's news" : "Old cached news")], !ready), etag: ready ? '"fresh"' : '"stale"' },
+  });
+  const content = workspace.window.SkillManagerContent;
+  content.onMainStatus({ firstRun: true });
+  await settle();
+  ready = true;
+
+  await content.refreshFeed(true, true);
+
+  assert.match(workspace.elements["news-cards"].textContent, /Today's news/);
+  assert.equal(workspace.elements["news-update-hint"].hidden, true);
+  assert.equal(content.session.pages.get("news:" + content.buildFeedURL()).stale, false);
+});
+
+test("stale startup polling retries promptly and returns to the normal fresh cache interval", async () => {
+  let now = 1000;
+  let calls = 0;
+  const workspace = makeWorkspace({
+    now: () => now,
+    request: async ({ url }) => {
+      if (url === "/api/content/status") return { sources: [], coverage: {}, notices: [] };
+      calls += 1;
+      return { status: 200, data: feed([entry("news_same", calls === 1 ? "Old cached news" : "Today's news")], calls === 1), etag: '"feed-' + calls + '"' };
+    },
+  });
+  workspace.window.SkillManagerContent.onMainStatus({ firstRun: true });
+  await settle();
+  assert.equal(workspace.intervals[0].delay, 15000);
+
+  now += 15000;
+  workspace.intervals[0].callback();
+  await settle();
+  assert.equal(calls, 2);
+  assert.match(workspace.elements["news-cards"].textContent, /Today's news/);
+
+  now += 15000;
+  workspace.intervals[0].callback();
+  await settle();
+  assert.equal(calls, 2, "a fresh feed should not be requested on every short retry tick");
+  now += 300000;
+  workspace.intervals[0].callback();
+  await settle();
+  assert.equal(calls, 3);
+});
+
+for (const reader of ["selected article", "scrolled list"]) test("stale startup recovery preserves the " + reader + " until accepted", async () => {
+  let ready = false;
+  const workspace = makeWorkspace({
+    request: async ({ url }) => url === "/api/content/status"
+      ? { sources: [], coverage: {}, notices: [] }
+      : { status: 200, data: feed([entry("news_same", ready ? "Updated news" : "Old cached news")], !ready), etag: ready ? '"fresh"' : '"stale"' },
+  });
+  const content = workspace.window.SkillManagerContent;
+  content.onMainStatus({ firstRun: true });
+  await settle();
+  if (reader === "selected article") content.session.news.entryId = "news_same";
+  else workspace.elements["news-cards"].scrollTop = 80;
+  ready = true;
+
+  await content.refreshFeed(true, true);
+
+  assert.match(workspace.elements["news-cards"].textContent, /Old cached news/);
+  assert.equal(workspace.elements["news-update-hint"].hidden, false);
+  workspace.elements["news-update-hint"].click();
+  assert.match(workspace.elements["news-cards"].textContent, /Updated news/);
+});
+
 test("status renders human labels and status errors leave management usable", async () => {
   const workspace = makeWorkspace({
     request: async () => ({
@@ -747,7 +819,7 @@ test("foreground polling installs once and refreshes only while content is visib
   content.onMainStatus({ firstRun: false });
   content.onMainStatus({ firstRun: false });
   assert.equal(workspace.intervals.length, 1);
-  assert.equal(workspace.intervals[0].delay, 300000);
+  assert.equal(workspace.intervals[0].delay, 15000);
   assert.equal(workspace.requests.length, 0, "management initialization must not await or fetch content");
 
   workspace.document.hidden = true;

@@ -443,10 +443,19 @@
 
           <div class="changelog">
             <div class="changelog-head">
-              <span class="cl-ver">v1.1.0</span>
-              <span class="cl-date">正式采用语义化版本 · 更新于 2026-08-14</span>
+              <span class="cl-ver">v1.1.1</span>
+              <span class="cl-date">正式采用语义化版本 · 更新于 2026-11-02</span>
             </div>
             <div class="changelog-scroll">
+            <div class="cl-rel">
+              <div class="cl-rel-head">v1.1.1 · 修复资讯缓存恢复（2026-11-02）</div>
+              <ul>
+                <li><b>旧缓存恢复</b>：启动时若资讯缓存已旧，客户端每 15 秒检查本机内容服务；服务返回新列表后，空闲列表自动接收并更新。</li>
+                <li><b>阅读位置保护</b>：已打开文章或已滚动列表会保留当前内容，并显示更新提示；用户确认后才应用新列表。</li>
+                <li><b>刷新间隔</b>：新鲜缓存仍按 5 分钟检查；远程 AIHOT 内容抓取仍为 10 分钟，本次未改变。</li>
+                <li><b>发布附件</b>：运行时和随包依赖未变化；完整源码附件复用 v1.1.0 已发布附件。</li>
+              </ul>
+            </div>
             <div class="cl-rel">
               <div class="cl-rel-head">v1.1.0 · 资讯、技能发现与本地一体版（2026-10-30）</div>
               <ul>

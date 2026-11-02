@@ -1,0 +1,75 @@
+name: Prepare v1.1.1 release assets
+on:
+  push:
+    branches:
+      - codex/release-v1.1.1
+    paths:
+      - .github/workflows/release-v1.1.1.yml
+permissions:
+  contents: write
+env:
+  GH_REPO: YSBZ/skill-manager
+  RELEASE_TAG: v1.1.1
+jobs:
+  macos:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.5"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: 1.25.x
+          cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22.22.2
+      - name: Verify and build universal desktop packages
+        run: |
+          set -euo pipefail
+          go test ./...
+          go vet ./...
+          node --test internal/server/dist/*.test.js
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          make -o winres desktop-dist desktop-win UPDATE_FEED=https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json UPDATE_TOKEN= FEEDBACK_ENDPOINT= FEEDBACK_TOKEN= CONTENT_SERVICE_URL=
+          codesign --verify --deep --strict dist/SkillManager.app
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, plistlib, re, zipfile
+          p = plistlib.loads(Path('dist/SkillManager.app/Contents/Info.plist').read_bytes())
+          assert p['CFBundleShortVersionString'] == '1.1.1' and p['CFBundleVersion'] == '65'
+          app_binary = Path('dist/SkillManager.app/Contents/MacOS/skillmanager-desktop').read_bytes()
+          assert b'https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json' in app_binary
+          assert not re.search(rb'/Users/[^/]+/workspace/', app_binary)
+          assets = []
+          for path in (Path('dist/pkg/SkillManager-desktop-macos-v1.1.1.zip'), Path('dist/pkg/SkillManager-desktop-windows-v1.1.1.zip')):
+              if path.suffix == '.zip':
+                  with zipfile.ZipFile(path) as z:
+                      assert z.testzip() is None
+                      if 'windows' in path.name:
+                          binary_name = next(n.filename for n in z.infolist() if n.filename.endswith('/SkillManager.exe'))
+                          binary = z.read(binary_name)
+                          assert b'https://raw.githubusercontent.com/YSBZ/skill-manager/main/release/latest.json' in binary
+                          assert not re.search(rb'/Users/[^/]+/workspace/', binary)
+                      assert not any(Path(n.filename).name in ('node', 'node.exe', 'content.db', 'credentials.yaml', 'token') for n in z.infolist() if not n.is_dir())
+              with path.open('rb') as f:
+                  digest = hashlib.file_digest(f, 'sha256').hexdigest()
+              assets.append({'name': path.name, 'sha256': digest, 'bytes': path.stat().st_size})
+          Path('dist/macos-assets.json').write_text(json.dumps({'version':'1.1.1','releaseCode':'65','assets':assets}, indent=2) + '\n')
+          PY
+      - name: Upload verified packages to existing draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          set -euo pipefail
+
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+          = true
+
+          gh release upload "$RELEASE_TAG" --clobber
+          dist/pkg/SkillManager-desktop-macos-v1.1.1.zip
+          dist/pkg/SkillManager-desktop-windows-v1.1.1.zip
+          dist/macos-assets.json

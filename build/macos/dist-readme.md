@@ -1,4 +1,4 @@
-# SkillManager v1.1.0 桌面版（macOS）
+# SkillManager v1.1.1 桌面版（macOS）
 
 通用版，支持 macOS 13.5 或更新版本，以及 Apple 芯片与 Intel Mac。Git、npm/npx 的 JavaScript CLI 和固定版 Skills CLI 随 App 提供；使用 Node 功能时需要本机安装 Node.js 22.20.0 或更新版本。无需另外启动终端服务。
 
@@ -25,7 +25,7 @@ Git 与 npm/Skills CLI 文件保存在 App 内，缓存和配置写入用户目�
 - 右上角「同步本地」重新扫描本地技能，Git 仓库也可在来源区域更新。
 - App 内含运行所需服务，双击即可打开，无需手动启动服务。Git、npm 的 JavaScript CLI 和 Skills CLI 随包提供；执行安装等 Node 操作要求本机 Node.js 22.20.0 或更新版本。缺少或过旧时，应用只在相关操作中提示官方下载页；资讯和本地浏览不依赖 Node。
 - Skill 源、设置和资讯缓存保存在本机 `~/.skillmanage/`，不会写进或随 App 包分发；更换/升级 App 不会打包这些个人数据。
-- GitHub 旧版 v6.0.x 无法自动识别此次跨版本号变化；请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动安装 v1.1.0 build64 一次，之后按新版应用内提示更新。
+- GitHub 旧版 v6.0.x 无法自动识别此次跨版本号变化；请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动安装 v1.1.1 build65 一次；已安装 v1.1.0 build64 的用户可通过应用内更新。之后按新版应用内提示更新。
 
 ## 卸载
 

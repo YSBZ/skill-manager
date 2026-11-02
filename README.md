@@ -12,14 +12,14 @@ Core idea: links point at **live git mirrors**, and a daily `fetch` makes every 
 
 ### Desktop app (macOS / Windows)
 
-Download v1.1.0 for your platform from [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest); no build is needed.
+Download v1.1.1 for your platform from [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest); no build is needed.
 
-- **macOS**: download the universal `SkillManager-desktop-macos-v1.1.0.zip` for Apple Silicon and Intel. Fully extract it and open `SkillManager.app`, or move it to Applications. This release is distributed as a ZIP.
-- **Windows**: download `SkillManager-desktop-windows-v1.1.0.zip`, fully extract it, and run `SkillManager.exe` (app icon embedded, no console window on double-click).
+- **macOS**: download the universal `SkillManager-desktop-macos-v1.1.1.zip` for Apple Silicon and Intel. Fully extract it and open `SkillManager.app`, or move it to Applications. This release is distributed as a ZIP.
+- **Windows**: download `SkillManager-desktop-windows-v1.1.1.zip`, fully extract it, and run `SkillManager.exe` (app icon embedded, no console window on double-click).
 
 > **macOS note**: the package uses local ad-hoc signing and is not Apple-notarized. Gatekeeper may block the first launch; follow macOS's Privacy & Security prompt after confirming the download. Apple documents the available steps [here](https://support.apple.com/en-us/102445).
 
-> **Upgrade note (v1.1.0 build 64)**: GitHub's previous v6.0.x releases do not carry the release code used to order this version change, so install v1.1.0 once from GitHub Releases. Windows users must fully extract the ZIP and keep its `runtime` folder; the old updater only replaces the executable. After installing v1.1.0, use the update path shown by the app. See [CHANGELOG.md](CHANGELOG.md).
+> **Upgrade note (v1.1.1 build 65)**: GitHub's previous v6.0.x releases do not carry the release code used to order this version change, so install v1.1.1 once from GitHub Releases. Windows users upgrading from v6.0.x or v1.0.0 must fully extract the ZIP and keep its `runtime` folder; the old updater only replaces the executable. Users already on v1.1.0 build64 can update in-app. After installing v1.1.1, use the update path shown by the app. See [CHANGELOG.md](CHANGELOG.md).
 
 - The central folder defaults to `~/.skillmanage` (config.yaml, manifest.yaml, the `local` managed store, lock, address, token); created automatically on first launch.
 - Manage everything from the app window; the `?` next to the title has the full guide, and the changelog lives in the version popover.

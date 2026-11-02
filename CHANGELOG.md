@@ -1,5 +1,14 @@
 # 更新日志 / Changelog
 
+## v1.1.1 · build 65 · 2026-11-02
+
+### 资讯缓存恢复
+
+- 修复旧缓存启动后资讯列表不能及时发现本机内容服务已就绪的问题：旧缓存场景下，客户端每 15 秒检查本机内容服务；服务返回新列表后，空闲列表自动更新。
+- 若文章已打开或列表已滚动，保留当前阅读内容并显示更新提示；用户确认后才应用新列表。
+- 新鲜缓存继续使用 5 分钟客户端检查间隔。远程 AIHOT 内容抓取仍为 10 分钟，本次未改变。
+- 运行时及随包依赖未改变；本次发布复用 v1.1.0 已发布的完整源码附件。
+
 ## v1.1.0 · build 64 · 2026-10-30
 
 ### AI 资讯与 Skill 发现
@@ -29,6 +38,13 @@
 Windows 旧更新器只替换 exe，无法加入本版需要的 `runtime` 文件夹。因此升级 Windows 旧版时，须下载完整 ZIP 并完整解压，保留整个目录和 `runtime`。升级到 v1.1.0 后，新版更新器会一并替换 exe 与 runtime。
 
 ## English
+
+### v1.1.1 · build 65 · 2026-11-02
+
+- **News cache recovery:** When startup uses stale cached news, the client checks the local content service every 15 seconds. An idle list adopts the new list automatically once the service returns fresh content.
+- If an article is open or the list has been scrolled, the current reading view stays in place and an update prompt is shown; the new list is applied only after confirmation.
+- Fresh-cache client checks remain at five minutes. Remote AIHOT fetching remains at ten minutes and is unchanged.
+- The runtime and bundled dependencies are unchanged. This release reuses the complete source attachments published with v1.1.0.
 
 ### v1.1.0 · build 64 · 2026-10-30
 

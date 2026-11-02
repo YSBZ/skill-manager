@@ -3,6 +3,7 @@
 (() => {
   const byId = (id) => document.getElementById(id);
   const CACHE_MS = 300000;
+  const STALE_RETRY_MS = 15000;
   const SESSION_STORAGE_KEY = "skillmanager.workspace";
   const session = {
     initialized: false,
@@ -358,7 +359,9 @@
       session.withdrawn.forEach((id) => removeEntryFromPage(page, id));
       const record = { page, etag: result.etag || "", checkedAt: Date.now(), stale: !!(page.meta && page.meta.stale) };
       const selectedID = activeQuery(surface).entryId;
-      if (deferReorder && cached && !sameFeedContent(cached.page, page)) {
+      const scrollOwner = currentScrollElement(surface);
+      const recoveringIdleCache = cached && cached.stale && !record.stale && !selectedID && !(scrollOwner && scrollOwner.scrollTop > 0);
+      if (deferReorder && cached && !recoveringIdleCache && !sameFeedContent(cached.page, page)) {
         cached.pending = record;
         cached.checkedAt = record.checkedAt;
         showNewContentHint(surface, key);
@@ -366,7 +369,7 @@
         if (selectedID && (resumeSelection || !(page.items || []).some((item) => item.id === selectedID))) selectEntry(selectedID, true);
         return true;
       }
-      if (cached && cached.pending && !deferReorder) {
+      if (cached && cached.pending && !deferReorder && !recoveringIdleCache) {
         // An already-announced update still needs an explicit accept action.
         cached.pending = record;
         cached.checkedAt = record.checkedAt;
@@ -867,7 +870,13 @@
       if (!document.hidden) refreshIfVisible();
     });
     window.addEventListener("focus", refreshIfVisible);
-    session.poll = window.setInterval(refreshIfVisible, CACHE_MS);
+    session.poll = window.setInterval(() => {
+      if (!visibleContent()) return;
+      const cached = session.pages.get(pageCacheKey(session.surface, buildFeedURL(session.surface)));
+      const current = cached && (cached.pending || cached);
+      if (current && !current.stale && Date.now() - current.checkedAt < CACHE_MS) return;
+      refreshIfVisible();
+    }, STALE_RETRY_MS);
   }
 
   bindWorkspaceNavigation();
