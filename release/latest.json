@@ -1,13 +1,13 @@
 {
-  "version": "1.1.1",
-  "releaseCode": "65",
-  "notes": "修复资讯启动后停留在旧缓存：空闲列表自动显示后台新内容，旧缓存每15秒检查本地服务，阅读和滚动位置保持不变；正常新鲜缓存5分钟、AIHOT上游抓取周期均不变。v1.1.0可应用内更新。",
+  "version": "1.1.2",
+  "releaseCode": "66",
+  "notes": "修复发现页空列表和筛选布局，按首次收录显示最新发现；GitHub 增长请求受限时保留已验证项目。新增只读 Skill 软链与明确依赖本地检查。周榜和安装验证要求保持；v1.1.0/v1.1.1 可应用内升级。",
   "assets": {
-    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.1/SkillManager-desktop-macos-v1.1.1.zip",
-    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.1/SkillManager-desktop-windows-v1.1.1.zip"
+    "desktop-macos": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.2/SkillManager-desktop-macos-v1.1.2.zip",
+    "desktop-windows": "https://github.com/YSBZ/skill-manager/releases/download/v1.1.2/SkillManager-desktop-windows-v1.1.2.zip"
   },
   "sha256": {
-    "desktop-macos": "4c2fbf59a6d6fc53f5dff6059c8e421f5cec43a771b8293d65ac3ddb30562945",
-    "desktop-windows": "6689ebdd189bd61eb7266b111dfb2aa5e6b3cdd8cfc73245d552630f2a3cb656"
+    "desktop-macos": "256b138da642e005b094a4c2b924bad84b3ba602cebe7b0cafde44698ecdea82",
+    "desktop-windows": "226b7e3bd1d2ba4011bdbdd9c6c6cee29cfffc2078eeba894cdc78f0adc96aec"
   }
 }
