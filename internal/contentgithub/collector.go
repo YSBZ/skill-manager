@@ -73,11 +73,14 @@ func (c *Collector) Refresh(ctx context.Context, now time.Time) error {
 		}
 		i := c.cursor % len(c.candidates)
 		ok, err := c.processCandidate(ctx, now, c.candidates[i])
-		if isRateLimitPause(err, now) {
+		if isRateLimitPause(err, now) && !ok {
 			// Retry the incomplete candidate once the budget or server limit resets.
 			c.cursor = i
 		} else {
 			c.cursor = (i + 1) % len(c.candidates)
+		}
+		if ok {
+			updated++ // an optional growth request may fail after the project was saved
 		}
 		if err != nil {
 			var storageErr *storageError
@@ -87,9 +90,6 @@ func (c *Collector) Refresh(ctx context.Context, now time.Time) error {
 				sourceErr = errors.Join(sourceErr, err)
 			}
 			break
-		}
-		if ok {
-			updated++
 		}
 	}
 
@@ -188,7 +188,7 @@ func (c *Collector) processCandidate(ctx context.Context, now time.Time, candida
 		}
 		return false, nil
 	}
-	if !inspection.Tree.Complete || !inspection.Complete {
+	if !inspection.Tree.Complete {
 		return false, nil
 	}
 	if metadata.Fork || inspection.Type == "" {
@@ -201,27 +201,52 @@ func (c *Collector) processCandidate(ctx context.Context, now time.Time, candida
 		return false, errors.New("github repository has invalid created_at")
 	}
 
-	growth, err := c.growth(ctx, now, metadata)
-	if err != nil {
-		return false, err
-	}
-	entry := normalizeProject(metadata, inspection.Skills, growth)
-	oldEntry, err := c.store.Get(ctx, entry.ID)
+	oldEntry, err := c.store.Get(ctx, projectID(metadata.ID))
 	if err != nil && !errors.Is(err, content.ErrNotFound) && !errors.Is(err, content.ErrWithdrawn) {
 		return false, storageFailure(err)
 	}
-	if err == nil {
+	exists := err == nil
+	if exists {
 		if oldEntry.Kind != "project" {
 			return false, errors.New("github project identity conflicts with a non-project entry")
 		}
+	}
+	if !inspection.Complete && exists {
+		// Preserve an existing verified Skill list when the current inspection
+		// is truncated by the file cap or cannot prove unique install identities.
+		return false, nil
+	}
+
+	var growth *content.Growth
+	var growthErr error
+	if inspection.Complete {
+		growth, growthErr = c.growth(ctx, now, metadata)
+		if growthErr != nil {
+			var storeFailure *storageError
+			if ctx.Err() != nil || errors.As(growthErr, &storeFailure) {
+				return false, growthErr
+			}
+			if exists && oldEntry.Project != nil {
+				growth = oldEntry.Project.Growth // keep its original window; never invent a new one
+			}
+		}
+	}
+	entry := normalizeProject(metadata, inspection.Skills, growth)
+	if !inspection.Complete {
+		// Repository metadata and a complete tree are enough for discovery.
+		// The inspector leaves every SkillRef unverified, so listing a project
+		// cannot grant installation permissions or create a weekly ranking.
+		entry.Reason = "已发现项目；Skill 安装信息尚未完成验证。"
+	}
+	if exists {
 		entry.DiscoveredAt = oldEntry.DiscoveredAt
 	} else {
 		entry.DiscoveredAt = now.UTC().Format(time.RFC3339)
 	}
 	if err := c.store.Upsert(ctx, entry); err != nil {
-		return false, storageFailure(err)
+		return false, storageFailure(errors.Join(err, growthErr))
 	}
-	return true, nil
+	return true, growthErr
 }
 
 func (c *Collector) deactivateProject(ctx context.Context, id string) error {

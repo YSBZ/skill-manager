@@ -27,6 +27,7 @@ import (
 	"skillmanage/internal/pathutil"
 	"skillmanage/internal/reconcile"
 	"skillmanage/internal/scanner"
+	"skillmanage/internal/skillcheck"
 	"skillmanage/internal/source"
 	"skillmanage/internal/toolchain"
 )
@@ -49,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/targets", s.requireAuth(s.handleTargets))
 	mux.HandleFunc("GET /api/skills", s.requireAuth(s.handleListSkills))
 	mux.HandleFunc("GET /api/skill", s.requireAuth(s.handleSkillDetail))
+	mux.HandleFunc("GET /api/skill-check", s.requireAuth(s.handleSkillCheck))
 	mux.HandleFunc("POST /api/export", s.requireAuth(s.handleExportSkill))
 	mux.HandleFunc("GET /api/update-check", s.requireAuth(s.handleUpdateCheck))
 	mux.HandleFunc("POST /api/update-apply", s.requireAuth(s.handleUpdateApply))
@@ -1447,20 +1449,20 @@ func (s *Server) handleSkillAt(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown sync target", http.StatusBadRequest)
 		return
 	}
-	inv, err := scanner.ScanInventory(want)
+	inv, err := scanner.ScanInventoryWithIssues(want)
 	if err != nil {
 		http.Error(w, "target not found", http.StatusNotFound)
 		return
 	}
 	for _, sk := range inv {
 		if sk.LinkName == name || sk.LogicalName == name {
-			content, _ := os.ReadFile(filepath.Join(sk.Dir, "SKILL.md"))
+			content := readableSkillContent(sk.Dir)
 			src, url := s.skillsShSource(sk.Dir, sk.LinkName)
 			writeJSON(w, http.StatusOK, skillDetail{
 				LinkName:    sk.LinkName,
 				LogicalName: sk.LogicalName,
 				Description: sk.Description,
-				Content:     string(content),
+				Content:     content,
 				Source:      src,
 				SourceURL:   url,
 			})
@@ -1478,6 +1480,9 @@ type pluginSkill struct {
 	Plugin      string `json:"plugin"`  // owning plugin (key before "@")
 	Version     string `json:"version"` // installed version, if known
 	Harness     string `json:"harness"` // cc | codex — which harness home this plugin lives under
+	Scope       string `json:"scope,omitempty"`
+	ProjectPath string `json:"projectPath,omitempty"`
+	Dir         string `json:"-"` // checked manifest entry, never a request path
 }
 
 // listPluginSkills reads each harness's plugins/installed_plugins.json and scans
@@ -1485,8 +1490,13 @@ type pluginSkill struct {
 // plugin. The manifest is the authoritative map (active install per plugin), so
 // stale cache versions are not double-counted.
 func listPluginSkills() []pluginSkill {
+	return listPluginSkillsForTarget("")
+}
+
+// listPluginSkillsForTarget preserves installation scope until after filtering
+// and priority selection. An empty target retains the installed inventory view.
+func listPluginSkillsForTarget(target string) []pluginSkill {
 	var out []pluginSkill
-	seen := map[string]bool{} // dedupe by plugin+skill across harness homes
 	homes := []string{}
 	if h, err := os.UserHomeDir(); err == nil {
 		homes = append(homes, filepath.Join(h, ".claude"), filepath.Join(h, ".codex"))
@@ -1504,6 +1514,9 @@ func listPluginSkills() []pluginSkill {
 		case ".claude":
 			harness = "cc"
 		}
+		if ch := os.Getenv("CODEX_HOME"); ch != "" && filepath.Clean(home) == filepath.Clean(ch) {
+			harness = "codex"
+		}
 		manifest := filepath.Join(home, "plugins", "installed_plugins.json")
 		data, err := os.ReadFile(manifest)
 		if err != nil {
@@ -1513,6 +1526,8 @@ func listPluginSkills() []pluginSkill {
 			Plugins map[string][]struct {
 				InstallPath string `json:"installPath"`
 				Version     string `json:"version"`
+				Scope       string `json:"scope"`
+				ProjectPath string `json:"projectPath"`
 			} `json:"plugins"`
 		}
 		if json.Unmarshal(data, &raw) != nil {
@@ -1532,23 +1547,34 @@ func listPluginSkills() []pluginSkill {
 					continue
 				}
 				for _, sk := range skills {
-					k := harness + "\x00" + plugin + "\x00" + sk.LinkName // dedupe per harness
-					if seen[k] {
+					p := pluginSkill{Name: sk.LinkName, Description: sk.Description, Plugin: plugin, Version: inst.Version, Harness: harness, Scope: inst.Scope, ProjectPath: inst.ProjectPath, Dir: sk.Dir}
+					if target != "" && pluginTargetPriority(p, target) < 0 {
 						continue
 					}
-					seen[k] = true
-					out = append(out, pluginSkill{Name: sk.LinkName, Description: sk.Description, Plugin: plugin, Version: inst.Version, Harness: harness})
+					out = append(out, p)
 				}
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
+	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Plugin != out[j].Plugin {
 			return out[i].Plugin < out[j].Plugin
 		}
-		return out[i].Name < out[j].Name
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return target != "" && pluginTargetPriority(out[i], target) < pluginTargetPriority(out[j], target)
 	})
-	return out
+	seen := map[string]bool{}
+	selected := out[:0]
+	for _, p := range out {
+		key := p.Harness + "\x00" + p.Plugin + "\x00" + p.Name
+		if !seen[key] {
+			seen[key] = true
+			selected = append(selected, p)
+		}
+	}
+	return selected
 }
 
 func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
@@ -1565,9 +1591,24 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePluginSkillDetail(w http.ResponseWriter, r *http.Request) {
 	plugin := r.URL.Query().Get("plugin")
 	name := r.URL.Query().Get("name")
-	harness := r.URL.Query().Get("harness")
+	requestedHarness := r.URL.Query().Get("harness")
 	if plugin == "" || name == "" {
 		http.Error(w, "missing plugin or name", http.StatusBadRequest)
+		return
+	}
+	if rawTarget := r.URL.Query().Get("target"); rawTarget != "" {
+		target, ok := s.configuredCheckTarget(rawTarget)
+		if !ok || !validCheckName(name) || (requestedHarness != "" && requestedHarness != string(harness.Classify(target))) {
+			http.Error(w, "invalid target or plugin skill", http.StatusBadRequest)
+			return
+		}
+		for _, p := range listPluginSkillsForTarget(target) {
+			if p.Plugin == plugin && p.Name == name {
+				writeJSON(w, http.StatusOK, skillDetail{LinkName: p.Name, LogicalName: p.Name, Description: p.Description, Content: readableSkillContent(p.Dir)})
+				return
+			}
+		}
+		http.Error(w, "skill not found", http.StatusNotFound)
 		return
 	}
 	homes := []string{}
@@ -1582,7 +1623,10 @@ func (s *Server) handlePluginSkillDetail(w http.ResponseWriter, r *http.Request)
 		if filepath.Base(home) == ".codex" {
 			hn = "codex"
 		}
-		if harness != "" && hn != harness {
+		if ch := os.Getenv("CODEX_HOME"); ch != "" && filepath.Clean(home) == filepath.Clean(ch) {
+			hn = "codex"
+		}
+		if requestedHarness != "" && hn != requestedHarness {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(home, "plugins", "installed_plugins.json"))
@@ -1615,12 +1659,12 @@ func (s *Server) handlePluginSkillDetail(w http.ResponseWriter, r *http.Request)
 				}
 				for _, sk := range skills {
 					if sk.LinkName == name || sk.LogicalName == name {
-						content, _ := os.ReadFile(filepath.Join(sk.Dir, "SKILL.md"))
+						content := readableSkillContent(sk.Dir)
 						writeJSON(w, http.StatusOK, skillDetail{
 							LinkName:    sk.LinkName,
 							LogicalName: sk.LogicalName,
 							Description: sk.Description,
-							Content:     string(content),
+							Content:     content,
 						})
 						return
 					}
@@ -1652,6 +1696,9 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 func (s *Server) sourceRoot(repo string) (string, bool) {
 	if repo == reconcile.LocalNamespace {
 		return s.personalStore, true
+	}
+	if repo == reconcile.SkillHubNamespace {
+		return s.skillHubStore(), true
 	}
 	if repo == reconcile.AgentsNamespace {
 		s.mu.Lock()
@@ -1731,13 +1778,13 @@ func (s *Server) handleSkillDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, sk := range skills {
 		if sk.LinkName == name || sk.LogicalName == name {
-			content, _ := os.ReadFile(filepath.Join(sk.Dir, "SKILL.md"))
+			content := readableSkillContent(sk.Dir)
 			src, url := s.skillsShSource(sk.Dir, sk.LinkName)
 			writeJSON(w, http.StatusOK, skillDetail{
 				LinkName:    sk.LinkName,
 				LogicalName: sk.LogicalName,
 				Description: sk.Description,
-				Content:     string(content),
+				Content:     content,
 				Source:      src,
 				SourceURL:   url,
 			})
@@ -1803,6 +1850,7 @@ type inventoryItem struct {
 	Follow      bool               `json:"follow,omitempty"`     // enabled via a whole-source follow (source/*) → no per-item disable
 	LinkTarget  string             `json:"linkTarget,omitempty"` // resolved source for unknown links and managed @agents verification
 	Collision   bool               `json:"collision,omitempty"`
+	Check       skillcheck.Report  `json:"check"` // local facts, separate from installation/enabling
 	// Dirty/DirtyKind flag a git-source skill with unpushed local changes
 	// (新增/修改/已提交未推送), computed live so 快捷上传 appears the moment the
 	// user edits — without waiting for the next sync.
@@ -1932,7 +1980,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	}
 	scope := harness.Scope(configured)
 
-	skills, err := scanner.ScanInventory(want)
+	skills, err := scanner.ScanInventoryWithIssues(want)
 	if err != nil {
 		// target dir not present/readable → empty inventory, not an error.
 		writeJSON(w, http.StatusOK, inventoryResp{Target: configured, Scope: scope, Items: []inventoryItem{}})
@@ -1954,6 +2002,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]inventoryItem, 0, len(skills))
+	checkCtx := s.checkContext(configured)
 	for _, sk := range skills {
 		res := clf.Classify(sk, configured)
 		// A symlink may store either the lexical ~/.agents/skills path or its
@@ -1981,6 +2030,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 			Scope:       scope,
 			Managed:     res.Kind == source.KindGit || res.Kind == source.KindLocal || res.Kind == source.KindDir || ownedAgents,
 			Collision:   shadowCollides(conflicts, sk.LinkName, configured),
+			Check:       skillcheck.Inspect(sk.Dir, checkCtx.client, checkCtx.available),
 		}
 		if res.Kind == source.KindSkillsSh {
 			it.SourceURL = validHTTPURL(res.SourceURL) // strip non-http(s) (XSS guard)
@@ -2004,7 +2054,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 			it.LinkTarget = canonicalAgentsMaterializationSource(clf.Mgr, &manifest, configured, sk, agentsSkillsRoot)
 		}
 		if it.Managed {
-			it.Enabled = true // present + managed ⟹ the link is live
+			it.Enabled = it.Check.Path.State == "ok" // a broken entry stays manageable, not enabled
 			src := res.Repo
 			if res.Kind == source.KindLocal {
 				src = reconcile.LocalNamespace

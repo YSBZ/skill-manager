@@ -701,6 +701,8 @@
   function sourceStateLabel(source) {
     const state = source && source.state;
     if (source && source.name === "github" && state === "stale" && !contentDate(source.lastSuccessAt)) return "尚无可用数据";
+    if (source && source.name === "github" && state === "rate_limited") return "请求受限";
+    if (source && source.name === "github" && state === "stale") return "已收录缓存";
     return ({ fresh: "已更新", stale: "缓存内容", rate_limited: "等待更新", unavailable: "暂不可用" })[state] || "状态未知";
   }
 
@@ -727,6 +729,13 @@
     });
   }
 
+  function retryDate(raw) {
+    const date = contentDate(raw);
+    return date && date.getTime() > Date.now() ? date.toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short",
+    }) : "";
+  }
+
   function sourceGroupFor(root, sources) {
     const isDiscovery = root.id === "discovery-status";
     return sources.filter((source) => {
@@ -744,8 +753,8 @@
     const worst = sources.reduce((state, source) => Math.max(state, severity[source.state] ?? 3), 0);
     if (worst === 3) return sources.length ? "暂不可用" : (meta.stale ? "缓存内容" : "状态未知");
     if (sources.some((source) => source.name === "github" && source.state === "stale" && !contentDate(source.lastSuccessAt))) return "尚无可用数据";
-    if (worst === 2) return "等待更新";
-    if (worst === 1 || meta.stale) return "缓存内容";
+    if (worst === 2) return sources.some((source) => source.name === "github") ? "请求受限" : "等待更新";
+    if (worst === 1 || meta.stale) return sources.some((source) => source.name === "github") ? "已收录缓存" : "缓存内容";
     return sources.length ? "已更新" : (meta.stale ? "缓存内容" : "状态未知");
   }
 
@@ -793,7 +802,11 @@
       const status = statusSummaryState(sources, value);
       const timestamp = latestSuccess(sources, value);
       const summaryParts = [sourceGroupName(root), status];
-      if (timestamp) summaryParts.push("更新于 " + timestamp);
+      const isDiscovery = root.id === "discovery-status";
+      if (timestamp) summaryParts.push((isDiscovery ? "数据检查点 " : "更新于 ") + timestamp);
+      const github = isDiscovery && sources.find((source) => source.name === "github");
+      const automaticRetry = github && github.state === "rate_limited" ? retryDate(github.retryAt) : "";
+      if (github && github.state === "rate_limited") summaryParts.push(automaticRetry ? "预计自动重试 " + automaticRetry : "等待后台重试");
       if (notices.length) summaryParts.push(notices.length + " 条通知");
       const label = document.createElement("span");
       label.className = "content-status-label";
@@ -809,9 +822,10 @@
       sources.forEach((source) => {
         const facts = [humanSourceName(source.name), sourceStateLabel(source)];
         const updated = compactDate(source.lastSuccessAt);
-        const retry = compactDate(source.retryAt);
-        if (updated) facts.push("上次成功 " + updated);
-        if (retry) facts.push("下次重试 " + retry);
+        const retry = source.name === "github" ? (source.state === "rate_limited" ? retryDate(source.retryAt) : "") : compactDate(source.retryAt);
+        if (updated) facts.push((source.name === "github" ? "数据检查点 " : "上次成功 ") + updated);
+        if (retry) facts.push((source.name === "github" ? "预计自动重试 " : "下次重试 ") + retry);
+        else if (source.name === "github" && source.state === "rate_limited") facts.push("等待后台重试");
         const line = document.createElement("p");
         line.textContent = facts.join(" · ");
         region.append(line);
@@ -823,7 +837,7 @@
       }
       if (hasStale && status !== "缓存内容") {
         const line = document.createElement("p");
-        line.textContent = "当前使用缓存内容。";
+        line.textContent = isDiscovery ? "当前展示已收录缓存。" : "当前使用缓存内容。";
         region.append(line);
       }
       notices.forEach((message) => {

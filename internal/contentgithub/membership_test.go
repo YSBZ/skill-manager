@@ -77,7 +77,7 @@ func TestCompletedQueryBootstrapServesVerifiedDataWhileSearchResumes(t *testing.
 			t.Fatalf("%s HTTP=%d body=%s", view, response.Code, response.Body.String())
 		}
 		want := 1
-		if view != "scenarios" {
+		if view == "weekly" {
 			want = 0
 		}
 		if len(page.Items) != want || page.Meta.Coverage.Candidates != 2 || page.Meta.Coverage.Updated != 1 || page.Meta.Coverage.CompleteGrowth != 0 {
@@ -111,8 +111,8 @@ func TestCompletedQueryBootstrapServesVerifiedDataWhileSearchResumes(t *testing.
 	}
 	assertActiveProjects(t, store, now, []string{"project_1", "project_90"})
 	page, err := content.NewCatalog(store, func() time.Time { return now }).Feed(ctx, content.Query{Kind: "project", View: "new"})
-	if err != nil || len(page.Items) != 1 || page.Items[0].ID != "project_90" || !page.Meta.Stale {
-		t.Fatalf("verified new project with an observed growth window not served: page=%+v error=%v", page, err)
+	if err != nil || len(page.Items) != 2 || page.Items[0].ID != "project_1" || page.Items[1].ID != "project_90" || !page.Meta.Stale {
+		t.Fatalf("latest discoveries must include verified mature repositories without requiring growth: page=%+v error=%v", page, err)
 	}
 }
 

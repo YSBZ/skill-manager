@@ -293,9 +293,9 @@ func TestRefreshUsesSnapshotFallbackOnlyForOrdinaryHistoryAbsence(t *testing.T) 
 		{name: "unauthorized history falls back", historyStatus: http.StatusUnauthorized, wantSuccess: true},
 		{name: "permission denied history falls back", historyStatus: http.StatusForbidden, wantSuccess: true},
 		{name: "history 404 falls back", historyStatus: http.StatusNotFound, wantSuccess: true},
-		{name: "history server error preserves cache", historyStatus: http.StatusServiceUnavailable},
-		{name: "history rate limit preserves cache", historyStatus: http.StatusTooManyRequests},
-		{name: "rate limited forbidden preserves cache", historyStatus: http.StatusForbidden, rateLimited: true},
+		{name: "history server error preserves growth", historyStatus: http.StatusServiceUnavailable},
+		{name: "history rate limit preserves growth", historyStatus: http.StatusTooManyRequests},
+		{name: "rate limited forbidden preserves growth", historyStatus: http.StatusForbidden, rateLimited: true},
 		{name: "malformed history falls back", historyRaw: "{ invalid private-history-body", wantSuccess: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -322,8 +322,12 @@ func TestRefreshUsesSnapshotFallbackOnlyForOrdinaryHistoryAbsence(t *testing.T) 
 				}
 				return
 			}
-			if err == nil || !reflect.DeepEqual(store.entries[old.ID], old) {
-				t.Fatalf("history server error should preserve old entry: err=%v entry=%#v", err, store.entries[old.ID])
+			got := store.entries[old.ID]
+			if err == nil || got.Project == nil || !reflect.DeepEqual(got.Project.Growth, old.Project.Growth) || got.DiscoveredAt != old.DiscoveredAt {
+				t.Fatalf("failed growth request must preserve old evidence and first discovery: err=%v entry=%#v", err, got)
+			}
+			if got.Summary != repo.metadata.Description || got.Project.Stars != repo.metadata.Stars {
+				t.Fatalf("failed growth request must not discard freshly verified metadata: %#v", got)
 			}
 		})
 	}
@@ -347,8 +351,9 @@ func TestRefreshDoesNotFallbackToSnapshotsForHistoryNetworkFailure(t *testing.T)
 	if err := collector.Refresh(context.Background(), testNow); err == nil {
 		t.Fatal("network failure unexpectedly used snapshot fallback")
 	}
-	if !reflect.DeepEqual(store.entries[old.ID], old) {
-		t.Fatalf("network failure changed old project: got %#v, want %#v", store.entries[old.ID], old)
+	got := store.entries[old.ID]
+	if got.Project == nil || !reflect.DeepEqual(got.Project.Growth, old.Project.Growth) || got.DiscoveredAt != old.DiscoveredAt {
+		t.Fatalf("network failure changed old growth or first discovery: got %#v, want %#v", got, old)
 	}
 }
 

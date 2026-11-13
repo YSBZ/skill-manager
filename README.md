@@ -6,20 +6,20 @@ A "skill sync" tool: it tracks multiple git skill repos, keeps them up to date a
 
 Deliberately low-configuration: you provide just two things — **① a git remote (the skill source)** and **② the directory to sync into**. Everything else is the tool's job: auto-update, selective / whole-repo sync, adopting your hand-written local skills, and contributing local changes back upstream.
 
-Core idea: links point at **live git mirrors**, and a daily `fetch` makes every linked skill instantly current — **zero install, zero update steps**. cc and codex skills are interchangeable; one source can map into both at once.
+Core idea: links point at **live git mirrors**, and a daily `fetch` makes every linked skill instantly current — **zero install, zero update steps**. Claude Code and Codex share the SKILL.md format, so one source can map into both; tool requirements and client-specific instructions may still need adaptation.
 
 ## Running
 
 ### Desktop app (macOS / Windows)
 
-Download v1.1.1 for your platform from [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest); no build is needed.
+Download v1.1.2 for your platform from [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest); no build is needed.
 
-- **macOS**: download the universal `SkillManager-desktop-macos-v1.1.1.zip` for Apple Silicon and Intel. Fully extract it and open `SkillManager.app`, or move it to Applications. This release is distributed as a ZIP.
-- **Windows**: download `SkillManager-desktop-windows-v1.1.1.zip`, fully extract it, and run `SkillManager.exe` (app icon embedded, no console window on double-click).
+- **macOS**: download the universal `SkillManager-desktop-macos-v1.1.2.zip` for Apple Silicon and Intel. Fully extract it and open `SkillManager.app`, or move it to Applications. This release is distributed as a ZIP.
+- **Windows**: download `SkillManager-desktop-windows-v1.1.2.zip`, fully extract it, and run `SkillManager.exe` (app icon embedded, no console window on double-click).
 
 > **macOS note**: the package uses local ad-hoc signing and is not Apple-notarized. Gatekeeper may block the first launch; follow macOS's Privacy & Security prompt after confirming the download. Apple documents the available steps [here](https://support.apple.com/en-us/102445).
 
-> **Upgrade note (v1.1.1 build 65)**: GitHub's previous v6.0.x releases do not carry the release code used to order this version change, so install v1.1.1 once from GitHub Releases. Windows users upgrading from v6.0.x or v1.0.0 must fully extract the ZIP and keep its `runtime` folder; the old updater only replaces the executable. Users already on v1.1.0 build64 can update in-app. After installing v1.1.1, use the update path shown by the app. See [CHANGELOG.md](CHANGELOG.md).
+> **Upgrade note (v1.1.2 build 66)**: v1.1.0 and v1.1.1 users can update in-app through GitHub. GitHub v6.0.x releases do not carry the release code used to order this version change, so install v1.1.2 once from GitHub Releases. Windows users upgrading from v6.0.x or v1.0.0 must fully extract the ZIP and keep its `runtime` folder; the old updater only replaces the executable. See [CHANGELOG.md](CHANGELOG.md).
 
 - The central folder defaults to `~/.skillmanage` (config.yaml, manifest.yaml, the `local` managed store, lock, address, token); created automatically on first launch.
 - Manage everything from the app window; the `?` next to the title has the full guide, and the changelog lives in the version popover.
@@ -50,7 +50,8 @@ Download v1.1.1 for your platform from [**GitHub Releases**](https://github.com/
 - **Contribute upstream**: locally added / modified / deleted skills are committed + pushed back to the git remote via "Sync repo", with an editable commit message.
 - **Secret / credential guard**: before uploading, if a secret-looking file is detected (`.env`, `*.pem`, `id_rsa`, `.npmrc`, files containing credential/secret, etc.), the dialog lists them in red and **gates the Confirm button** behind an explicit acknowledgement; the backend enforces this too (calling the API directly, bypassing the UI, is still blocked). Templates like `.env.example` don't count.
 - **Online search & install**: the top search box queries your local sources plus two online marketplaces — [skills.sh](https://skills.sh) and [skillsmp](https://skillsmp.com) — at once. Online cards are badged by origin (skills.sh ↓ downloads / skillsmp ★ stars); installing routes through `npx skills add` into the canonical `~/.agents/skills` (the **npx skills** source), so update / disable behave like any other npx skill. A gear ⚙ filters by source / sort / count; the two sources are queried in parallel and one failing never blocks the other.
-- **AI news and Skill discovery**: read AIHOT news summaries and follow source links, then search for related Skills. Discovery highlights fast-rising GitHub projects over a recent week and newly discovered projects, alongside search from skills.sh and skillsmp; these are discovery candidates, not quality certification.
+- **AI news and Skill discovery**: read AIHOT news summaries and follow source links, then search for related Skills. Discovery lists newly discovered projects by first-seen time and keeps verified project details visible when optional GitHub growth requests are rate-limited. Results are candidates, not quality certification.
+- **Local Skill checks**: inspect broken links, missing SKILL.md files and explicit Skill dependencies without executing Skills or rewriting third-party content. Installation/enabled state is separate from local findings; tools and MCP availability still need confirmation in an agent session.
 - **Model rankings and reset calendar**: browse the available model leaderboard and AIHOT reset-calendar entries. AIHOT content is cached; the displayed refresh time indicates how current the local copy is.
 - **Themes and status colors**: switch between light and dark themes. Warning and conflict states use higher-contrast colors in the light theme.
 - **Adopt / back up local skills**: move a hand-written, unmanaged skill from a sync directory into the managed store and symlink it in place, making it a cross-harness reusable source. Optionally scan plugin directories and adopt by **copy-import** (never touching the plugin originals).

@@ -816,7 +816,8 @@
 }
 
 #discovery-workspace .discovery-columns[data-layout="compact"] {
-  grid-template-columns: minmax(0, 1fr);
+  /* Keep the same 340px directory as reader mode; the unused reader is open ground. */
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   align-content: start;
 }
 
@@ -877,10 +878,27 @@
 
 .discovery-search-form {
   display: grid;
-  grid-template-columns: minmax(110px, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "query submit"
+    "scene market";
   align-items: end;
   gap: 8px;
   margin: 0;
+  max-width: 400px;
+}
+
+.discovery-search-form .discovery-query-field {
+  grid-area: query;
+}
+
+.discovery-search-form > button[type="submit"] {
+  grid-area: submit;
+}
+
+.discovery-search-form #discovery-market-search {
+  grid-area: market;
+  justify-self: start;
 }
 
 .discovery-search-form label {
@@ -907,8 +925,10 @@
 }
 
 .discovery-search-form .discovery-scene-field {
-  grid-column: 1 / -1;
-  grid-template-columns: auto minmax(110px, .58fr);
+  grid-area: scene;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-self: start;
+  width: min(100%, 220px);
   align-items: center;
   gap: 9px;
   padding-top: 2px;
@@ -1080,7 +1100,21 @@
 
 .discovery-empty {
   padding: 12px 4px;
+  color: var(--text);
   line-height: 1.6;
+}
+
+.discovery-empty > p {
+  margin: 0;
+}
+
+.discovery-empty-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.discovery-empty > .discovery-empty-help {
+  margin-top: 6px;
 }
 
 .discovery-empty-actions {
@@ -1119,7 +1153,8 @@
 }
 
 @media (max-width: 760px) {
-  .content-columns.discovery-columns {
+  .content-columns.discovery-columns,
+  #discovery-workspace .discovery-columns[data-layout="compact"] {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1135,21 +1170,6 @@
   #discovery-workspace #discovery-detail {
     grid-column: auto;
     grid-row: auto;
-  }
-}
-
-@media (max-width: 520px) {
-  .discovery-search-form {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .discovery-search-form #discovery-market-search {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-
-  .discovery-search-form .discovery-scene-field {
-    grid-template-columns: auto minmax(0, 1fr);
   }
 }
 

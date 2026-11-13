@@ -5,6 +5,7 @@ package scanner
 
 import (
 	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -66,7 +67,16 @@ type frontmatter struct {
 // Returns empty strings when there is no frontmatter or it cannot be parsed — a
 // missing field is not an error.
 func parseFrontmatter(skillMdPath string) (name, description, version string) {
-	data, err := os.ReadFile(skillMdPath)
+	info, err := os.Stat(skillMdPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+		return "", "", ""
+	}
+	f, err := os.Open(skillMdPath)
+	if err != nil {
+		return "", "", ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 1<<20))
 	if err != nil {
 		return "", "", ""
 	}
@@ -273,6 +283,17 @@ func ScanShallow(root string) ([]Skill, error) {
 // the classifier can read the link. os.Stat follows the link to confirm it
 // resolves to a directory containing SKILL.md.
 func ScanInventory(root string) ([]Skill, error) {
+	return scanInventory(root, false)
+}
+
+// ScanInventoryWithIssues additionally retains direct child links whose source
+// is gone, cyclic, unreadable, or no longer contains SKILL.md. It is for the
+// directory-status UI only: discovery/adoption must not treat these as skills.
+func ScanInventoryWithIssues(root string) ([]Skill, error) {
+	return scanInventory(root, true)
+}
+
+func scanInventory(root string, includeIssues bool) ([]Skill, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
@@ -285,11 +306,14 @@ func ScanInventory(root string) ([]Skill, error) {
 		}
 		child := filepath.Join(root, name)
 		fi, statErr := os.Stat(child) // follows symlink
-		if statErr != nil || !fi.IsDir() {
-			continue
-		}
 		md, mdErr := os.Stat(filepath.Join(child, "SKILL.md"))
-		if mdErr != nil || md.IsDir() {
+		valid := statErr == nil && fi.IsDir() && mdErr == nil && md.Mode().IsRegular()
+		isLink := e.Type()&(os.ModeSymlink|os.ModeIrregular) != 0
+		if !isLink {
+			_, readErr := os.Readlink(child) // also recognizes Windows junctions
+			isLink = readErr == nil
+		}
+		if !valid && !(includeIssues && isLink) {
 			continue
 		}
 		abs, absErr := filepath.Abs(child) // keeps the symlink path; does not resolve it

@@ -1,4 +1,4 @@
-# SkillManager v1.1.1 桌面版（Windows）
+# SkillManager v1.1.2 桌面版（Windows）
 
 原生窗口版，双击运行。压缩包包含 Git 2.56.0、npm/npx 的 JavaScript CLI 和固定版 Skills CLI；使用 Node 功能时需要本机安装 Node.js 22.20.0 或更新版本。无需手动启动服务。
 
@@ -24,12 +24,14 @@ WebView2 已包含在 Windows 11 中，也已安装在大多数 Windows 10 设�
 - App 使用压缩包内的 Git、npm JavaScript CLI 和 Skills CLI；在线 Skill 安装等 Node 功能使用本机 Node.js 22.20.0 或更新版本。若缺少或版本过旧，相关操作会显示 Node.js 官方下载入口；安装后重新打开 App。App 不修改系统 PATH、用户 HOME 或全局软件安装。
 - 缺少合适的本机 Node.js 不影响 App 启动、资讯、日历、模型榜和本地内容查看。
 - 远端仓库、在线搜索和 Skill 安装需要网络；本地已有内容可以离线查看。私有 Git 仓继续使用你的 Git 凭据和 SSH key。
-- **本次更新**：增加 AIHOT 资讯摘要、来源和相关 Skill 搜索；发现页展示近一周增长较快的 GitHub 项目、新发现项目及技能市场搜索；加入模型榜、重置日历，以及亮暗主题和更清晰的告警/冲突颜色。发现结果是候选信息，不是质量认证。
+- **本次更新**：修复发现页长期无项目和筛选区布局问题，按首次收录展示“最新发现”，请求受限时保留真实缓存；新增 Skill 断链及明确依赖的只读本地检查。周榜仍要求完整增长数据，安装验证不变；本地检查不执行 Skill，也不替代实际运行验证。
 - 资讯、重置日历和模型榜会缓存到本机；联网使用时，以页面展示的更新时间判断缓存新旧。
 - 右上角「同步本地」重新扫描本地技能，Git 仓库也可在来源区域更新。
 - 配置与缓存保存在 `%USERPROFILE%\.skillmanage\`，不随压缩包分发。
 - App 内含运行所需服务，双击即可打开，无需手动启动服务。联网浏览不要求安装 Node；执行 Skill 安装等 Node 操作要求本机 Node.js 22.20.0 或更新版本。缺少或过旧时，仅在相关操作中提示官方下载页。
-- GitHub 旧版 v6.0.x 没有递增构建号，无法自动识别此次跨版本号变化；请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动完整安装 v1.1.1 build65 一次。Windows v6.0.x/v1.0.0 旧更新器只替换 exe，不能安装本版所需的 `runtime` 文件夹；请退出旧版、下载并完整解压 ZIP，保留整个目录。已安装 v1.1.0 build64 的用户可通过应用内更新；之后新版更新器会一并替换 exe 和 runtime。
+- 从 v1.0.0 build63 升级时，旧 Windows 更新器只替换 exe，无法安装新版所需的 `runtime` 文件夹；请退出旧版、下载并完整解压 v1.1.2 build66 ZIP，保留完整目录。GitHub 旧版 v6.0.x 也不能自动识别此次跨版本号变化，请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动下载完整 ZIP 安装一次。之后使用新版应用内提示更新。
+
+v1.1.0 / v1.1.1 用户可按应用内提示更新到本版。
 
 ## 升级与卸载
 

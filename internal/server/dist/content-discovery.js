@@ -57,6 +57,13 @@
     return localizedDateTime(raw);
   }
 
+  function localRetryTime(raw) {
+    const date = parsedDate(raw);
+    return date && date.getTime() > Date.now() ? date.toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short",
+    }) : "";
+  }
+
   function typeLabel(type) {
     return typeLabels[String(type || "").toLowerCase()] || "其他项目";
   }
@@ -64,7 +71,7 @@
   function sourceStateLabel(source) {
     const state = source && source.state;
     if (source && source.name === "github" && state === "stale" && !parsedDate(source.lastSuccessAt)) return "尚无可用数据";
-    return ({ fresh: "已更新", stale: "缓存内容", rate_limited: "等待更新", unavailable: "暂不可用" })[state] || "状态未知";
+    return ({ fresh: "已更新", stale: "已收录缓存", rate_limited: "请求受限", unavailable: "暂不可用" })[state] || "状态未知";
   }
 
   function githubSource(meta) {
@@ -76,7 +83,9 @@
     const github = githubSource(meta);
     const parts = ["GitHub 数据状态：" + (github ? sourceStateLabel(github) : "状态未知")];
     const updated = localizedDateTime(github && github.lastSuccessAt);
-    if (updated) parts.push("最近成功更新 " + updated);
+    if (updated) parts.push("数据检查点 " + updated);
+    const retry = localRetryTime(github && github.retryAt);
+    if (github && github.state === "rate_limited") parts.push(retry ? "预计自动重试 " + retry : "等待后台重试");
     text(parent, "small", parts.join("；"), "discovery-github-state");
   }
 
@@ -149,6 +158,10 @@
     if (project.type === "skill" && Array.isArray(project.skills)) {
       text(parent, "small", "Skill 引用：" + project.skills.length, "discovery-skill-count");
     }
+    const discovered = validDate(entry && entry.discoveredAt);
+    const created = validDate(project.createdAt);
+    if (discovered) text(parent, "small", "首次收录：" + discovered, "discovery-project-date");
+    if (created) text(parent, "small", "仓库创建：" + created, "discovery-project-date");
     renderGrowth(parent, project.growth, false);
   }
 
@@ -211,15 +224,17 @@
     notices.setAttribute("aria-label", "列表来源通知");
     notices.setAttribute("tabindex", "0");
     updateControls(context.query);
-    if (stale || meta.stale) text(notices, "p", "当前列表来自缓存。", "content-notice");
+    if (stale || meta.stale) text(notices, "p", "当前展示已收录缓存。", "content-notice");
     renderCoverage(notices, meta.coverage);
-    const github = githubSource(meta);
-    text(notices, "p", "GitHub 数据状态：" + (github ? sourceStateLabel(github) : "状态未知"), "content-notice");
+    renderGitHubFreshness(notices, meta);
     (Array.isArray(meta.notices) ? meta.notices : []).forEach((notice) => {
       const message = notice && typeof notice === "object" ? (notice.message || notice.text) : typeof notice === "string" ? notice : "";
       if (typeof message === "string" && message.trim()) text(notices, "p", message, "content-notice");
     });
 
+    if (context.query.view === "new") {
+      text(cards, "p", "按首次收录时间排序，包含已有仓库；旧记录缺少收录时间时按仓库创建时间排序。", "content-notice discovery-view-description");
+    }
     if (context.query.view === "weekly" && items.length && items.every((entry) => entry && entry.project && entry.project.growth && entry.project.growth.metric === "stars_net" && entry.project.growth.complete === true && entry.project.growth.observedDays === 7)) {
       text(cards, "h2", "近 7 日净增 Star 榜", "discovery-ranking-title");
       text(cards, "p", "基于同一完整 7 日窗口的本地 Star 快照；净增包含取消 Star。", "content-notice");
@@ -254,28 +269,47 @@
   function renderEmptyState(parent, context, meta) {
     const noFilters = !String(context.query.q || "").trim() && !String(context.query.scene || "");
     const noFullWeeks = !!(meta && meta.coverage && hasNumber(meta.coverage.completeGrowth) && meta.coverage.completeGrowth === 0);
-    const message = context.query.view === "weekly" && noFilters && noFullWeeks
-      ? "正在积累周数据；目前没有可展示的完整 7 日增长记录。"
-      : "当前条件下没有匹配的项目。";
+    const github = githubSource(meta);
+    const limited = github && github.state === "rate_limited";
+    const unavailable = github && github.state === "unavailable";
+    let message;
+    if (!noFilters) message = "当前筛选下没有匹配的项目。";
+    else if (context.query.view === "weekly" && noFullWeeks) message = "正在积累周数据；目前没有可展示的完整 7 日增长记录。";
+    else if (context.query.view === "weekly") message = "已收录范围内暂无符合完整 7 日增长要求的项目。";
+    else if (limited) message = "GitHub 请求受限，当前已收录缓存中暂无可展示的项目。";
+    else if (unavailable) message = "GitHub 暂不可用，当前已收录缓存中暂无可展示的项目。";
+    else message = "尚无已收录项目。";
     const empty = document.createElement("div");
     empty.className = "content-empty discovery-empty";
     text(empty, "p", message);
-    if (context.query.view === "weekly") {
-      const links = document.createElement("div");
-      links.className = "discovery-empty-actions";
-      [
-        ["新项目发现", "new"],
-        ["场景探索", "scenarios"],
-      ].forEach(([label, view]) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = label;
-        button.addEventListener("click", () => content.setFeedFilter("view", view));
-        links.append(button);
-      });
-      empty.append(links);
-    }
+    if (limited || unavailable) text(empty, "p", (limited ? "GitHub 请求受限" : "GitHub 暂不可用") + "；更新恢复后会继续收录，也可先探索场景或搜索技能市场。", "discovery-empty-help");
+    else if (noFilters && context.query.view !== "weekly") text(empty, "p", "收录后将在这里显示，可先探索场景或搜索技能市场。", "discovery-empty-help");
+    renderEmptyActions(empty, context);
     parent.append(empty);
+  }
+
+  function searchMarket() {
+    const term = String(byId("discovery-search-query").value || "").trim().slice(0, 200);
+    if (window.SkillManagerAPI && typeof window.SkillManagerAPI.searchSkills === "function") window.SkillManagerAPI.searchSkills(term);
+    else content.showMarketSearch();
+  }
+
+  function renderEmptyActions(parent, context) {
+    const links = document.createElement("div");
+    links.className = "discovery-empty-actions";
+    const actions = [];
+    if (String(context.query.q || "").trim() || context.query.scene) actions.push(["清除筛选", () => content.setFeedFilters({ q: "", scene: "" })]);
+    if (context.query.view === "weekly") actions.push(["最新发现", () => content.setFeedFilter("view", "new")]);
+    if (context.query.view !== "scenarios") actions.push(["场景探索", () => content.setFeedFilter("view", "scenarios")]);
+    actions.push(["搜索技能市场", searchMarket]);
+    actions.forEach(([label, action]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", action);
+      links.append(button);
+    });
+    parent.append(links);
   }
 
   function renderEntry(entry, meta) {
@@ -323,7 +357,7 @@
     if (hasNumber(project.stars)) text(parent, "p", "总 Star：" + Number(project.stars) + "（仓库级）");
     const created = validDate(project.createdAt);
     const discovered = validDate(entry.discoveredAt);
-    if (created) text(parent, "p", "项目创建：" + created);
+    if (created) text(parent, "p", "仓库创建：" + created);
     if (discovered) text(parent, "p", "首次收录：" + discovered);
     renderGrowth(parent, project.growth);
     renderScenes(parent, project.scenes);
@@ -536,7 +570,7 @@
     setDiscoveryLayout(!!(context && context.selectedId), false);
     cards.replaceChildren();
     notices.replaceChildren();
-    text(cards, "p", "首次收录暂时不可用，当前没有可展示的项目列表。", "content-notice discovery-error-message");
+    text(cards, "p", "项目列表暂时不可用，当前没有可展示的项目列表。", "content-notice discovery-error-message");
     text(cards, "p", "请重试，或使用上方“搜索技能市场”查找现成 Skill。", "discovery-error-help");
     const retry = document.createElement("button");
     retry.type = "button";
@@ -544,6 +578,7 @@
     retry.textContent = "重试";
     retry.addEventListener("click", () => content.refreshFeed(true));
     cards.append(retry);
+    renderEmptyActions(cards, context);
   }
 
   document.querySelectorAll("[data-discovery-view]").forEach((button) => {
@@ -556,11 +591,7 @@
   byId("discovery-scene-filter").addEventListener("change", (event) => {
     content.setFeedFilter("scene", event.target.value);
   });
-  byId("discovery-market-search").addEventListener("click", () => {
-    const term = String(byId("discovery-search-query").value || "").trim().slice(0, 200);
-    if (window.SkillManagerAPI && typeof window.SkillManagerAPI.searchSkills === "function") window.SkillManagerAPI.searchSkills(term);
-    else content.showMarketSearch();
-  });
+  byId("discovery-market-search").addEventListener("click", searchMarket);
 
   content.registerRenderer("discovery", {
     feed: renderFeed,
@@ -569,4 +600,6 @@
     error: renderError,
   });
   updateControls(content.session.project);
+  setDiscoveryLayout(false, false);
+  text(byId("discovery-cards"), "p", "正在读取已收录项目…", "content-empty discovery-loading");
 })();

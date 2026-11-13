@@ -679,30 +679,47 @@ func weeklyProjectsByMetric(entries []Entry, metric string) []Entry {
 }
 
 func newProjects(entries []Entry, now time.Time) []Entry {
-	cutoff := now.Add(-30 * 24 * time.Hour)
-	eligible := make([]Entry, 0, len(entries))
+	type discoveredProject struct {
+		entry Entry
+		at    time.Time
+	}
+	eligible := make([]discoveredProject, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Project == nil || entry.Project.Growth == nil {
+		if entry.Project == nil {
 			continue
 		}
-		created, ok := parseTimestamp(entry.Project.CreatedAt)
-		if !ok || created.Before(cutoff) || created.After(now) {
+		created, validCreation := parseTimestamp(entry.Project.CreatedAt)
+		if validCreation && created.After(now) {
 			continue
 		}
-		eligible = append(eligible, entry)
+		discovered, validDiscovery := parseTimestamp(entry.DiscoveredAt)
+		if validDiscovery {
+			if discovered.After(now) {
+				continue
+			}
+			eligible = append(eligible, discoveredProject{entry: entry, at: discovered})
+			continue
+		}
+		if !validCreation {
+			continue
+		}
+		eligible = append(eligible, discoveredProject{entry: entry, at: created})
 	}
 	sort.SliceStable(eligible, func(i, j int) bool {
-		left, _ := parseTimestamp(eligible[i].Project.CreatedAt)
-		right, _ := parseTimestamp(eligible[j].Project.CreatedAt)
-		if !left.Equal(right) {
-			return left.After(right)
+		left, right := eligible[i], eligible[j]
+		if !left.at.Equal(right.at) {
+			return left.at.After(right.at)
 		}
-		if eligible[i].Project.RepositoryID != eligible[j].Project.RepositoryID {
-			return eligible[i].Project.RepositoryID < eligible[j].Project.RepositoryID
+		if left.entry.Project.RepositoryID != right.entry.Project.RepositoryID {
+			return left.entry.Project.RepositoryID < right.entry.Project.RepositoryID
 		}
-		return eligible[i].ID < eligible[j].ID
+		return left.entry.ID < right.entry.ID
 	})
-	return eligible
+	out := make([]Entry, 0, len(eligible))
+	for _, project := range eligible {
+		out = append(out, project.entry)
+	}
+	return out
 }
 
 func filterEntries(entries []Entry, q Query) []Entry {

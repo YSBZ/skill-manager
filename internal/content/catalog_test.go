@@ -386,20 +386,47 @@ func TestCatalogProjectWeeklyUsesLatestCompleteStarsAddedWindow(t *testing.T) {
 	}
 }
 
-func TestCatalogProjectNewAndScenarioOrderingAndFilters(t *testing.T) {
+func TestCatalogProjectLatestDiscoveryAndScenarioOrderingAndFilters(t *testing.T) {
 	ctx := context.Background()
 	store := newMemoryCatalogStore()
 	now := testNow()
-	createdRecent := now.Add(-2 * 24 * time.Hour).Format(time.RFC3339)
-	createdYesterday := now.Add(-24 * time.Hour).Format(time.RFC3339)
-	createdOld := now.Add(-31 * 24 * time.Hour).Format(time.RFC3339)
-	for _, entry := range []Entry{
-		testProject("project_20", 20, "org/zeta", createdYesterday, &Growth{Metric: "stars_net", Value: 2, ObservedDays: 2}, "search"),
-		testProject("project_10", 10, "org/alpha", createdYesterday, &Growth{Metric: "stars_added", Value: 5, ObservedDays: 7}, "search", "editor"),
-		testProject("project_30", 30, "org/mid", createdRecent, &Growth{Metric: "stars_net", Value: 3, ObservedDays: 1}, "editor"),
-		testProject("project_40", 40, "org/old", createdOld, &Growth{Metric: "stars_added", Value: 99, ObservedDays: 7}, "search"),
-		testProject("project_50", 50, "org/no-growth", createdRecent, nil, "search"),
-	} {
+	created := func(age time.Duration) string { return now.Add(-age).Format(time.RFC3339Nano) }
+	project := func(id string, repositoryID int64, repo, createdAt, discoveredAt string, scenes ...string) Entry {
+		entry := testProject(id, repositoryID, repo, createdAt, nil, scenes...)
+		entry.DiscoveredAt = discoveredAt
+		entry.Summary = "needle project"
+		return entry
+	}
+	entries := []Entry{
+		// A mature repository with no growth evidence is still newest because it
+		// was first discovered recently.
+		project("project_90", 90, "org/old", "2020-01-01T00:00:00Z", created(time.Hour), "search", "editor"),
+		// Same discovery time is ordered by RepositoryID, then ID, regardless of
+		// the ID order returned by the store.
+		project("project_tie_a", 20, "org/tie-a", created(13*time.Hour), created(2*time.Hour), "search"),
+		project("project_tie_z", 10, "org/tie-z", created(13*time.Hour), created(2*time.Hour), "search", "editor"),
+		project("project_tie_01", 10, "org/tie-01", created(13*time.Hour), created(2*time.Hour), "search"),
+		// Repository creation can be newer than discovery; ordering follows the
+		// first-discovered time.
+		project("project_recent_created", 30, "org/recent", created(30*time.Minute), created(3*time.Hour), "search", "editor"),
+		project("project_legacy_invalid", 40, "org/legacy-invalid", created(4*time.Hour), "not-a-timestamp", "search"),
+		project("project_legacy_blank", 50, "org/legacy-blank", created(5*time.Hour), "", "search", "editor"),
+		project("project_legacy_old", 51, "org/legacy-old", created(40*24*time.Hour), "", "search"),
+		project("project_invalid_created_discovered", 52, "org/invalid-created-discovered", "invalid", created(6*time.Hour), "search"),
+		project("project_ignore_filter", 60, "org/editor-only", created(time.Minute), created(30*time.Minute), "editor"),
+		// A future discovery timestamp must not fall back to the otherwise valid
+		// repository creation timestamp.
+		project("project_future_discovery", 70, "org/future-discovery", created(5*time.Minute), now.Add(time.Minute).Format(time.RFC3339Nano), "search"),
+		project("project_future_created", 71, "org/future-created", now.Add(time.Minute).Format(time.RFC3339Nano), created(7*time.Hour), "search"),
+		project("project_invalid_created", 72, "org/invalid-created", "invalid", "", "search"),
+	}
+	inactive := project("project_inactive", 73, "org/inactive", created(time.Hour), created(time.Second), "search")
+	inactive.Project.Inactive = true
+	inactiveNil := Entry{ID: "project_nil", Kind: "project", Title: "nil project", Paragraphs: []Paragraph{}}
+	wrongKind := project("news_project", 74, "org/wrong-kind", created(time.Hour), created(time.Second), "search")
+	wrongKind.Kind = "news"
+	entries = append(entries, inactive, inactiveNil, wrongKind)
+	for _, entry := range entries {
 		if err := store.Upsert(ctx, entry); err != nil {
 			t.Fatal(err)
 		}
@@ -411,16 +438,44 @@ func TestCatalogProjectNewAndScenarioOrderingAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := []string{page.Items[0].ID, page.Items[1].ID, page.Items[2].ID}; !reflect.DeepEqual(got, []string{"project_10", "project_20", "project_30"}) {
-		t.Fatalf("new ordering/filter = %v", got)
+	want := []string{"project_ignore_filter", "project_90", "project_tie_01", "project_tie_z", "project_tie_a", "project_recent_created", "project_legacy_invalid", "project_legacy_blank", "project_invalid_created_discovered", "project_legacy_old"}
+	if got := entryIDs(page.Items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("latest-discovery ordering/eligibility = %v, want %v", got, want)
 	}
+
+	query := Query{Kind: "project", View: "new", Scene: "search", Q: "needle", Limit: 2}
+	var filtered []string
+	for {
+		page, err = catalog.Feed(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		filtered = append(filtered, entryIDs(page.Items)...)
+		if page.NextCursor == "" {
+			break
+		}
+		query.Cursor = page.NextCursor
+	}
+	wantFiltered := []string{"project_90", "project_tie_01", "project_tie_z", "project_tie_a", "project_recent_created", "project_legacy_invalid", "project_legacy_blank", "project_invalid_created_discovered", "project_legacy_old"}
+	if !reflect.DeepEqual(filtered, wantFiltered) {
+		t.Fatalf("filtered latest-discovery pages = %v, want %v", filtered, wantFiltered)
+	}
+
 	page, err = catalog.Feed(ctx, Query{Kind: "project", View: "scenarios", Scene: "editor", Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := []string{page.Items[0].ID, page.Items[1].ID}; !reflect.DeepEqual(got, []string{"project_10", "project_30"}) {
+	if got := entryIDs(page.Items); !reflect.DeepEqual(got, []string{"project_ignore_filter", "project_legacy_blank", "project_90", "project_recent_created", "project_tie_z"}) {
 		t.Fatalf("scenario order/filter = %v", got)
 	}
+}
+
+func entryIDs(entries []Entry) []string {
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.ID)
+	}
+	return ids
 }
 
 func TestCatalogEmptyUnavailableAndStaleCache(t *testing.T) {

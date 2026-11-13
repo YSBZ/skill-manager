@@ -6,20 +6,20 @@
 
 刻意减少定制：使用者只需提供两样东西——**① git 远程仓（skill 来源）** 和 **② 要同步进去的目录**。其余都是工具的活：自动更新、选择性 / 整仓同步、把本地手写 skill 反向收编、把本地改动贡献回上游。
 
-核心机制：链接指向**活的 git 镜像**，每天 `fetch` 让被链接的 skill 立即最新，**零安装、零更新动作**。cc 与 codex 的 skill 通用，同一来源可同时映射进两边。
+核心机制：链接指向**活的 git 镜像**，每天 `fetch` 让被链接的 skill 立即最新，**零安装、零更新动作**。Claude Code 与 Codex 使用相同的 SKILL.md 格式，同一来源可映射进两边；工具依赖和客户端特有指令仍可能需要适配。
 
 ## 运行
 
 ### 桌面 app（macOS / Windows）
 
-从 [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest)下载 v1.1.1 对应平台的桌面包，无需自行构建。
+从 [**GitHub Releases**](https://github.com/YSBZ/skill-manager/releases/latest)下载 v1.1.2 对应平台的桌面包，无需自行构建。
 
-- **macOS**：下载 `SkillManager-desktop-macos-v1.1.1.zip` 通用包，支持 Apple 芯片与 Intel。完整解压后双击 `SkillManager.app`，也可拖进「应用程序」。本次提供 ZIP 安装包。
-- **Windows**：下载并完整解压 `SkillManager-desktop-windows-v1.1.1.zip`，保留整个目录，再运行 `SkillManager.exe`（已嵌入应用图标，双击无控制台窗口）。
+- **macOS**：下载 `SkillManager-desktop-macos-v1.1.2.zip` 通用包，支持 Apple 芯片与 Intel。完整解压后双击 `SkillManager.app`，也可拖进「应用程序」。本次提供 ZIP 安装包。
+- **Windows**：下载并完整解压 `SkillManager-desktop-windows-v1.1.2.zip`，保留整个目录，再运行 `SkillManager.exe`（已嵌入应用图标，双击无控制台窗口）。
 
 > **macOS 注意**：安装包使用本地 ad-hoc 签名，未经 Apple 公证。首次打开时 Gatekeeper 可能拦截；请先确认下载来源，再按「隐私与安全性」中的系统提示操作。Apple 的说明见[此处](https://support.apple.com/en-us/102445)。
 
-> **v1.1.1 build65 升级说明**：GitHub 旧版 v6.0.x 没有用于跨版本比较的递增构建号，因此不会自动识别到 1.x；请从 GitHub Releases 手动完整安装一次 v1.1.1。Windows v6.0.x/v1.0.0 旧版更新器只替换 exe，升级时须完整解压 ZIP 并保留 `runtime` 文件夹。已安装 v1.1.0 build64 的用户可通过应用内更新。详见 [CHANGELOG.md](CHANGELOG.md)。
+> **v1.1.2 build66 升级说明**：v1.1.0 / v1.1.1 用户可通过 GitHub 应用内更新。GitHub 历史 v6.0.x 没有用于跨版本比较的递增构建号，需从 GitHub Releases 手动完整安装一次 v1.1.2。Windows v6.0.x/v1.0.0 旧版更新器只替换 exe，升级时须完整解压 ZIP 并保留 `runtime` 文件夹。详见 [CHANGELOG.md](CHANGELOG.md)。
 
 - 中央文件夹默认 `~/.skillmanage`（含 config.yaml、manifest.yaml、local 受管存储、lock、address、token）；首次启动自动创建。
 - 在应用窗口里管理一切；标题旁的 `?` 有完整使用指南，更新日志在版本号弹层里。
@@ -50,7 +50,8 @@
 - **贡献回上游**：本地新增 / 修改 / 删除的 skill 通过「同步仓库」commit + push 回 git 远程，提交信息可编辑。
 - **密钥 / 凭据保护**：上传前若检出疑似密钥文件（`.env`、`*.pem`、`id_rsa`、`.npmrc`、含 credential/secret 的文件等），弹窗标红列出并**闸住「确认」**，必须显式勾选才推；后端也强制拦截（绕过 UI 直接打 API 同样拦得住）。`.env.example` 等模板不算。
 - **在线搜索并安装**：顶部搜索框同时查本地各源与两个在线市场——[skills.sh](https://skills.sh) 与 [skillsmp](https://skillsmp.com)。在线卡片按来源打徽章（skills.sh ↓下载数 / skillsmp ★星数）；安装统一走 `npx skills add`，装进 canonical `~/.agents/skills`（归「npx skills」源），更新 / 停用与其它 npx skill 一致。齿轮 ⚙ 按来源 / 排序 / 数量筛选；两源并行查询，任一源失败不影响另一源。
-- **AI 资讯与 Skill 发现**：浏览 AIHOT 资讯摘要和来源链接，并从资讯查找相关 Skill。发现页突出近一周增长较快的 GitHub 项目以及新发现项目，也可搜索 skills.sh 与 skillsmp；这些是发现候选，不代表质量认证。
+- **AI 资讯与 Skill 发现**：浏览 AIHOT 资讯摘要和来源链接，并从资讯查找相关 Skill。最新发现按首次收录时间展示；GitHub 增长请求受限时仍保留已验证项目资料。本页结果是发现候选，不代表质量认证。
+- **Skill 本地检查**：只读检查断链、缺少 SKILL.md 和明确的 Skill 转发依赖，不执行 Skill，也不自动改写第三方内容。安装／启用状态与检查结果分开展示；工具和 MCP 是否可用仍需在 Agent 会话中确认。
 - **模型榜与重置日历**：查看可用的模型榜单以及 AIHOT 重置日历记录。资讯等 AIHOT 内容会缓存在本地，页面显示更新时间供判断内容新旧。
 - **主题与状态颜色**：可切换亮色和暗色主题；亮色主题下告警、冲突状态也使用更清晰的颜色区分。
 - **收编 / 备份本地 skill**：把同步目录里手写、未纳管的真身 skill 移入受管存储并原位软链，成为可跨 harness 复用的来源。可选扫描插件目录并以**复制导入**方式收编（不改动插件原件）。

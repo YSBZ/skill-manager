@@ -975,9 +975,30 @@ test("GitHub stale checkpoint without a successful timestamp is not labeled as c
 
   status.sources[0].lastSuccessAt = "2026-10-28T09:00:00Z";
   await workspace.window.SkillManagerContent.refreshContentStatus();
-  assert.match(workspace.elements["discovery-status"].textContent, /缓存内容/);
+  assert.match(workspace.elements["discovery-status"].textContent, /已收录缓存/);
 
   status.sources[0].state = "unavailable";
   await workspace.window.SkillManagerContent.refreshContentStatus();
   assert.match(workspace.elements["discovery-status"].textContent, /暂不可用/);
+});
+
+test("GitHub rate limiting names the limit and local retry time in the visible status summary", async () => {
+  const retryAt = "2026-11-04T02:15:00Z";
+  const workspace = makeWorkspace({ request: async () => ({ sources: [{ name: "github", state: "rate_limited", lastSuccessAt: "2026-10-29T10:00:00Z", retryAt }], stale: true }) });
+  await workspace.window.SkillManagerContent.refreshContentStatus();
+  const status = workspace.elements["discovery-status"];
+  const summary = status.children[0].children[0].textContent;
+  assert.match(summary, /请求受限/);
+  assert.match(summary, /数据检查点/);
+  assert.match(summary, /自动重试/);
+  assert.match(status.textContent, /已收录缓存/);
+  assert.doesNotMatch(status.textContent, /等待更新|下次重试/);
+  assert.ok(summary.includes(new Date(retryAt).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" })));
+});
+
+test("invalid GitHub retry times never imply an automatic retry schedule", async () => {
+  const workspace = makeWorkspace({ request: async () => ({ sources: [{ name: "github", state: "rate_limited", retryAt: "2026-02-31T12:00:00Z" }] }) });
+  await workspace.window.SkillManagerContent.refreshContentStatus();
+  assert.match(workspace.elements["discovery-status"].textContent, /请求受限/);
+  assert.doesNotMatch(workspace.elements["discovery-status"].textContent, /自动重试|2026-02-31/);
 });

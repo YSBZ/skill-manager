@@ -405,7 +405,7 @@ async function load(sync) {
 // does not trip it (tokens are sorted). Used purely to gate repaints.
 function computeSig(p) {
   const skillTok = (arr) => (arr || [])
-    .map((s) => (s.name || s.skill || "") + "|" + (s.version || "") + "|" + (s.description || ""))
+    .map((s) => (s.name || s.skill || "") + "|" + (s.version || "") + "|" + (s.description || "") + "|" + window.SkillManagerSkillCheck.fingerprint(s.check))
     .sort().join(",");
   const repoTok = (p.repos || [])
     .map((r) => r.name + "|" + r.state + "|" + (r.drift && r.drift.dirty ? 1 : 0)).sort().join(",");
@@ -414,7 +414,7 @@ function computeSig(p) {
   const byRepo = Object.keys(p.skillsByRepo || {}).sort()
     .map((k) => k + ":" + skillTok(p.skillsByRepo[k])).join(";");
   const invTok = (p.inventory || [])
-    .map((i) => (i.name || "") + "|" + (i.kind || "") + "|" + (i.source || i.ns || "") + "|" + (i.version || "") + "|" + (i.enabled ? 1 : 0))
+    .map((i) => (i.name || "") + "|" + (i.kind || "") + "|" + (i.source || i.ns || "") + "|" + (i.version || "") + "|" + (i.enabled ? 1 : 0) + "|" + window.SkillManagerSkillCheck.fingerprint(i.check))
     .sort().join(",");
   return [repoTok, srcTok, byRepo, skillTok(p.pluginSkills), skillTok(p.skillsShSkills), skillTok(p.skillHubSkills), invTok].join("§");
 }
@@ -1963,7 +1963,7 @@ function sourceMeta(ns) {
 
 // renderSearchResults is the GLOBAL skill search: instead of filtering only the
 // current directory, it searches every enable-able skill across all sources
-// (git mirrors + local sources + skills.sh) and lets you enable/disable each
+// (git mirrors + local sources + skills.sh + SkillHub) and lets you enable/disable each
 // into the current target in real time. Driven by the search box (non-empty term).
 function renderSearchResults(root, term) {
   const target = currentTarget();
@@ -1974,8 +1974,10 @@ function renderSearchResults(root, term) {
     (skills || []).forEach((sk) => all.push({ ns, name: sk.linkName || sk.logicalName, description: sk.description, version: sk.version }));
   }
   (state.skillsShSkills || []).forEach((sk) => all.push({ ns: AGENTS_NS, name: sk.linkName || sk.logicalName, description: sk.description, version: sk.version }));
+  (state.skillHubSkills || []).forEach((sk) => all.push({ ns: SKILLHUB_NS, name: sk.linkName || sk.logicalName, description: sk.description, version: sk.version }));
+  (state.pluginSkills || []).forEach((sk) => all.push({ ns: sk.plugin, name: sk.name, description: sk.description, version: sk.version, plugin: sk.plugin, harness: sk.harness }));
   const items = all
-    .filter((r) => r.name.toLowerCase().includes(term) || (r.description || "").toLowerCase().includes(term))
+    .filter((r) => (r.name || "").toLowerCase().includes(term) || (r.ns + ":" + r.name).toLowerCase().includes(term) || (r.description || "").toLowerCase().includes(term))
     .sort((a, b) => a.name.localeCompare(b.name) || a.ns.localeCompare(b.ns));
 
   const folded = state.searchFold.local;
@@ -1991,22 +1993,23 @@ function renderSearchResults(root, term) {
   if (folded) {
     // 本地区折叠：仍渲染在线区
   } else if (!items.length) {
-    root.append(ce("div", { className: "empty", textContent: "没有匹配的本地 skill（已搜索全部 git / 本地 / skills.sh 源）" }));
+    root.append(ce("div", { className: "empty", textContent: "没有匹配的本地 skill（已搜索全部 git / 本地 / skills.sh / SkillHub / 插件源）" }));
   } else {
     const body = ce("div", { className: "inv-group-body" });
     items.forEach((r) => {
       const enabled = enabledSel.has(r.ns + "/" + r.name);
       const follow = enabledFollow(r.ns);
-      const meta = sourceMeta(r.ns);
+      const meta = r.plugin ? { label: r.plugin, cls: "src-plugin" } : sourceMeta(r.ns);
       const card = ce("div", { className: "skill inv clickable", title: "查看详情" });
-      card.onclick = (e) => { if (e.target.closest("button, a")) return; openDetail(r.ns, r.name); };
+      card.onclick = (e) => { if (e.target.closest("button, a")) return; if (r.plugin) openPluginDetail(r.plugin, r.name, r.harness); else openDetail(r.ns, r.name); };
       const main = ce("div", { className: "skill-main" });
       const r1 = ce("div", { className: "skill-row1" });
       r1.append(ce("span", { className: "skill-name", textContent: cleanSkillName(r.name), title: r.name }));
       { const vt = verTag(r.version); if (vt) r1.append(vt); }
       r1.append(ce("span", { className: "src-badge " + meta.cls, textContent: meta.label }));
       r1.append(ce("span", { className: "group-spacer" }));
-      r1.append(enableControl(r.ns, r.name, follow, enabled, target, renderInventory));
+      if (r.plugin) r1.append(ce("span", { className: "src-badge src-readonly", textContent: "插件只读" }));
+      else r1.append(enableControl(r.ns, r.name, follow, enabled, target, renderInventory));
       main.append(r1);
       if (r.description) main.append(ce("div", { className: "skill-desc", textContent: r.description }));
       card.append(main);
@@ -2325,7 +2328,7 @@ function renderInventory() {
   const curHarness = (state.targets.find((t) => t.dir === currentTarget()) || {}).harness;
   (state.pluginSkills || []).forEach((p) => {
     if (curHarness && p.harness && p.harness !== curHarness) return;
-    items.push({ kind: "plugin", name: p.name, description: p.description, plugin: p.plugin, version: p.version, harness: p.harness });
+    items.push({ kind: "plugin", name: p.name, description: p.description, plugin: p.plugin, version: p.version, harness: p.harness, check: p.check });
   });
   if (items.length === 0) {
     const box = ce("div", { className: "empty" });
@@ -2458,11 +2461,10 @@ function inventoryCard(i) {
   const s = SRC[i.kind] || SRC.unknown;
   const row = ce("div", { className: "skill inv clickable " + s.cls, title: "查看详情" });
   // openDetailFor opens this skill's SKILL.md the right way for its kind
-  // (managed → source repo; plugin → plugin tree; else → physical path) and
+  // (plugin → plugin tree; every directory item → its physical entry) and
   // fills the modal footer with this skill's contextual actions.
   const openDetailFor = () => {
-    const p = i.managed && i.selector ? openDetail(i.selector.split("/")[0], i.name)
-      : i.kind === "plugin" ? openPluginDetail(i.plugin, i.name, i.harness)
+    const p = i.kind === "plugin" ? openPluginDetail(i.plugin, i.name, i.harness)
       : openDetailAt(i.name);
     setInventoryActions(i); // card actions live in the detail modal footer now
     return p;
@@ -2539,6 +2541,7 @@ function inventoryCard(i) {
   }
 
   main.append(r1);
+  main.append(window.SkillManagerSkillCheck.badge(document, i.check));
   // 反查：show where an unknown stray symlink points.
   if (i.kind === "unknown" && i.linkTarget) main.append(ce("div", { className: "inv-linktarget", title: i.linkTarget, textContent: "→ " + i.linkTarget }));
   if (i.description) main.append(ce("div", { className: "skill-desc", textContent: i.description }));
@@ -2893,7 +2896,7 @@ function clearModalActions() { const el = $("#modal-actions"); el.innerHTML = ""
 function setInventoryActions(i) {
   const el = $("#modal-actions");
   el.innerHTML = "";
-  const closeDetail = () => $("#modal").classList.add("hidden");
+  const closeDetail = closeSkillDetail;
   const add = (label, cls, title, fn) => {
     const b = ce("button", { className: cls, textContent: label });
     if (title) b.title = title;
@@ -3038,7 +3041,62 @@ async function updateAllPlugins(targets, btn) {
   else toast(current + " 个插件均已是最新，无需更新");
 }
 
+// One shared scope protects content, source metadata and authorship across all
+// three entry points. Checks have their own scope in the pure DOM controller.
+const detailScope = window.SkillManagerSkillCheck.createRequestScope();
+async function refreshSkillDetail(params) {
+  const token = detailScope.begin();
+  $("#modal-content").textContent = "加载中…";
+  $("#modal-desc").textContent = "";
+  resetAuthorship();
+  setDetailSource(null);
+  let path, query;
+  if (params.plugin) {
+    path = "/api/plugin-skill";
+    query = { plugin: params.plugin, name: params.name, harness: params.harness, target: params.target };
+  } else if (params.repo) {
+    path = "/api/skill";
+    query = { repo: params.repo, name: params.name };
+  } else {
+    path = "/api/skill-at";
+    query = { target: params.target, name: params.name };
+  }
+  try {
+    const d = await api("GET", path + "?" + new URLSearchParams(query));
+    if (!detailScope.isCurrent(token)) return;
+    $("#modal-desc").textContent = d.description || "";
+    setDetailSource(d);
+    $("#modal-content").textContent = d.content || "暂无可读的 SKILL.md，请查看上方本地检查。";
+    if (params.repo) loadAuthorship(params.repo, params.name, token);
+  } catch (e) {
+    if (detailScope.isCurrent(token)) $("#modal-content").textContent = "加载失败：" + e.message;
+  }
+}
+const skillCheckUI = window.SkillManagerSkillCheck.createController(document, $("#modal-check"), {
+  request: query => api("GET", "/api/skill-check?" + query),
+  onRefresh: async params => {
+    await refreshSkillDetail(params);
+    await fetchInventory(); // read-only: never call load(true) / apply
+  },
+  onSearch: name => {
+    closeSkillDetail();
+    $("#repo-skills-modal").classList.add("hidden");
+    state.search = name; // retain namespace for local matching
+    $("#search").value = name;
+    window.SkillManagerContent?.showMarketSearch();
+    renderInventory();
+    $("#search").focus(); // online search stays an explicit Search / Enter action
+  },
+});
+function closeSkillDetail() {
+  detailScope.cancel();
+  skillCheckUI.cancel();
+  $("#modal").classList.add("hidden");
+}
+
 async function openDetail(repo, name) {
+  const token = detailScope.begin();
+  skillCheckUI.open({ repo, name, target: currentTarget() });
   $("#modal-title").textContent = name;
   $("#modal-desc").textContent = "";
   resetAuthorship();
@@ -3049,11 +3107,13 @@ async function openDetail(repo, name) {
   $("#modal").classList.remove("hidden");
   try {
     const d = await api("GET", "/api/skill?repo=" + encodeURIComponent(repo) + "&name=" + encodeURIComponent(name));
+    if (!detailScope.isCurrent(token)) return;
     $("#modal-desc").textContent = d.description || "";
     setDetailSource(d);
     $("#modal-content").textContent = d.content || "(空)";
-    loadAuthorship(repo, name); // git-source only; best-effort, fills in async
+    loadAuthorship(repo, name, token); // git-source only; best-effort, fills in async
   } catch (e) {
+    if (!detailScope.isCurrent(token)) return;
     $("#modal-content").textContent = "加载失败：" + e.message;
   }
 }
@@ -3095,10 +3155,11 @@ function resetAuthorship() {
 
 // loadAuthorship fills the detail modal's 创建人 / 最近修改 line for a git-source
 // skill (other sources have no git history, so it stays hidden). Best-effort.
-async function loadAuthorship(repo, name) {
+async function loadAuthorship(repo, name, token) {
   if (!(state.status.repos || []).some((r) => r.name === repo)) return; // git repos only
   try {
     const d = await api("GET", "/api/skill-authorship?repo=" + encodeURIComponent(repo) + "&skill=" + encodeURIComponent(name));
+    if (!detailScope.isCurrent(token)) return;
     const a = d && d.authorship;
     if (!a) return;
     const parts = [];
@@ -3115,6 +3176,8 @@ async function loadAuthorship(repo, name) {
 
 // openPluginDetail reads a plugin skill's SKILL.md from its install tree.
 async function openPluginDetail(plugin, name, harness) {
+  const token = detailScope.begin();
+  skillCheckUI.open({ plugin, name, harness: harness || "", target: currentTarget() });
   $("#modal-title").textContent = name;
   $("#modal-desc").textContent = "";
   resetAuthorship();
@@ -3124,10 +3187,12 @@ async function openPluginDetail(plugin, name, harness) {
   $("#modal-content").textContent = "加载中…";
   $("#modal").classList.remove("hidden");
   try {
-    const d = await api("GET", "/api/plugin-skill?plugin=" + encodeURIComponent(plugin) + "&name=" + encodeURIComponent(name) + "&harness=" + encodeURIComponent(harness || ""));
+    const d = await api("GET", "/api/plugin-skill?plugin=" + encodeURIComponent(plugin) + "&name=" + encodeURIComponent(name) + "&harness=" + encodeURIComponent(harness || "") + "&target=" + encodeURIComponent(currentTarget()));
+    if (!detailScope.isCurrent(token)) return;
     $("#modal-desc").textContent = d.description || "";
     $("#modal-content").textContent = d.content || "(空)";
   } catch (e) {
+    if (!detailScope.isCurrent(token)) return;
     $("#modal-content").textContent = "加载失败：" + e.message;
   }
 }
@@ -3136,22 +3201,27 @@ async function openPluginDetail(plugin, name, harness) {
 // target dir — used for non-managed inventory kinds (skills.sh / 未备份 / 未知)
 // that have no source-repo selector.
 async function openDetailAt(name) {
+  const token = detailScope.begin();
+  const target = currentTarget();
+  skillCheckUI.open({ target, name });
   $("#modal-title").textContent = name;
   $("#modal-desc").textContent = "";
   resetAuthorship();
   setDetailSource(null);
   // 现状/inventory 视图里的条目都是软链（本地真身除外），只能操作链（启用/停用），
   // 不在此对「本体」下手（卸载等本体操作只属于「源」视图，如 skills.sh 列表弹窗）。
-  exportCtx = { target: currentTarget(), name }; // resolves the symlink to its real target
+  exportCtx = { target, name }; // resolves the symlink to its real target
   clearModalActions();
   $("#modal-content").textContent = "加载中…";
   $("#modal").classList.remove("hidden");
   try {
-    const d = await api("GET", "/api/skill-at?target=" + encodeURIComponent(currentTarget()) + "&name=" + encodeURIComponent(name));
+    const d = await api("GET", "/api/skill-at?target=" + encodeURIComponent(target) + "&name=" + encodeURIComponent(name));
+    if (!detailScope.isCurrent(token)) return;
     $("#modal-desc").textContent = d.description || "";
     setDetailSource(d);
-    $("#modal-content").textContent = d.content || "(空)";
+    $("#modal-content").textContent = d.content || "暂无可读的 SKILL.md，请查看上方本地检查。";
   } catch (e) {
+    if (!detailScope.isCurrent(token)) return;
     $("#modal-content").textContent = "加载失败：" + e.message;
   }
 }
@@ -3870,8 +3940,8 @@ function importRepos() {
   };
   inp.click();
 }
-$("#modal-close").onclick = () => $("#modal").classList.add("hidden");
-$("#modal").onclick = (e) => { if (e.target.id === "modal") $("#modal").classList.add("hidden"); };
+$("#modal-close").onclick = closeSkillDetail;
+$("#modal").onclick = (e) => { if (e.target.id === "modal") closeSkillDetail(); };
 
 // 首次使用、以及每次版本更新后，自动弹出使用指南一次（按版本号记忆：换了新版就
 // 再弹一次，让用户看到本版改了什么；同版本内只弹一次）。版本号取自更新日志头部的
@@ -3897,7 +3967,7 @@ $("#seg-presets").onclick = () => setAsideTab("presets");
 load(true).then(() => checkUpdates());
 setInterval(() => checkUpdates(), 60 * 60 * 1000);
 
-// App self-update check: ask the configured feed whether a newer
+// App self-update check (phase 6): ask the company-private feed whether a newer
 // SkillManager release exists and, if so, show a sticky notice. Disabled builds
 // (no feed) return {enabled:false} → no-op, no banner, no network. Checked on
 // entry + hourly + on window focus.
@@ -3916,7 +3986,7 @@ async function checkAppUpdate() {
       } else {
         // web build / unsupported → just notify (manual download)
         if (btn) btn.classList.add("hidden");
-        banner("SkillManager 有新版本 v" + d.latest + "（当前 v" + d.current + "）" + (d.notes ? "：" + d.notes : "") + "　·　请前往 GitHub Releases 下载更新", false, true);
+        banner("SkillManager 有新版本 v" + d.latest + "（当前 v" + d.current + "）" + (d.notes ? "：" + d.notes : "") + "　·　请到公司 GitLab 下载更新", false, true);
       }
     } else if (btn) {
       btn.classList.add("hidden");

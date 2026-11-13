@@ -1,10 +1,11 @@
-# SkillManager v1.1.1 桌面版（macOS）
+# SkillManager v1.1.2 桌面版（macOS）
 
 通用版，支持 macOS 13.5 或更新版本，以及 Apple 芯片与 Intel Mac。Git、npm/npx 的 JavaScript CLI 和固定版 Skills CLI 随 App 提供；使用 Node 功能时需要本机安装 Node.js 22.20.0 或更新版本。无需另外启动终端服务。
 
 ## 安装
 
-- **zip**：本次发行提供通用 ZIP，支持 Apple 芯片和 Intel。完整解压后双击 **SkillManager.app** 即可，也可拖进「应用程序」以便以后启动。
+- **zip**：本次发行使用通用 ZIP。完整解压后双击 **SkillManager.app** 即可，也可拖进「应用程序」以便以后启动。
+- **dmg（若提供）**：双击打开，把 **SkillManager.app** 拖到「应用程序」（Applications）。
 
 Git 与 npm/Skills CLI 文件保存在 App 内，缓存和配置写入用户目录，直接从解压目录运行也不需要终端。缺少合适的本机 Node.js 不影响 App 启动、资讯、日历、模型榜和本地内容查看。
 
@@ -20,12 +21,14 @@ Git 与 npm/Skills CLI 文件保存在 App 内，缓存和配置写入用户目�
 - App 使用随包 Git 2.56.0、npm 11.20.0 JavaScript CLI 和 Skills CLI 1.7.4；在线 Skill 安装等 Node 功能使用本机 Node.js 22.20.0 或更新版本。若缺少或版本过旧，相关操作会显示 Node.js 官方下载入口；安装后重新打开 App。App 不修改系统 PATH、用户 HOME 或全局软件安装。
 - 远端仓库与在线 Skill 搜索、安装需要网络；本地已有内容可以离线查看。私有 Git 仓继续使用你的 Git 凭据和 SSH key。
 - macOS 包保留 Git 与 Git LFS，省去可选的 .NET 图形凭据管理器。私有 HTTPS 仓库可在仓库卡片「填写凭据」中保存 PAT；已有 SSH 配置继续使用。
-- **本次更新**：增加 AIHOT 资讯摘要、来源和相关 Skill 搜索；发现页展示近一周增长较快的 GitHub 项目、新发现项目及技能市场搜索；加入模型榜、重置日历，以及亮暗主题和更清晰的告警/冲突颜色。发现结果是候选信息，不是质量认证。
+- **本次更新**：修复发现页长期无项目和筛选区布局问题，按首次收录展示“最新发现”，请求受限时保留真实缓存；新增 Skill 断链及明确依赖的只读本地检查。周榜仍要求完整增长数据，安装验证不变；本地检查不执行 Skill，也不替代实际运行验证。
 - 资讯、重置日历和模型榜会缓存到本机；联网使用时，以页面展示的更新时间判断缓存新旧。
 - 右上角「同步本地」重新扫描本地技能，Git 仓库也可在来源区域更新。
 - App 内含运行所需服务，双击即可打开，无需手动启动服务。Git、npm 的 JavaScript CLI 和 Skills CLI 随包提供；执行安装等 Node 操作要求本机 Node.js 22.20.0 或更新版本。缺少或过旧时，应用只在相关操作中提示官方下载页；资讯和本地浏览不依赖 Node。
 - Skill 源、设置和资讯缓存保存在本机 `~/.skillmanage/`，不会写进或随 App 包分发；更换/升级 App 不会打包这些个人数据。
-- GitHub 旧版 v6.0.x 无法自动识别此次跨版本号变化；请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动安装 v1.1.1 build65 一次；已安装 v1.1.0 build64 的用户可通过应用内更新。之后按新版应用内提示更新。
+- GitHub v1.1.0 / v1.1.1 用户可按应用内提示更新；GitHub 历史 v6.0.x 无法自动识别此次跨版本号变化，请从 [GitHub Releases](https://github.com/YSBZ/skill-manager/releases/latest) 手动安装 v1.1.2。
+
+v1.1.0 / v1.1.1 用户可按应用内提示更新到本版。
 
 ## 卸载
 

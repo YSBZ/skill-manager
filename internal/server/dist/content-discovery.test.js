@@ -212,7 +212,7 @@ function activateDiscovery(workspace) {
 }
 
 test("index wires all project discovery views and loads its renderer before app.js", () => {
-  for (const [id, label] of [["discovery-view-nav", "本周飙升"], ["discovery-view-nav", "新项目发现"], ["discovery-view-nav", "场景探索"], ["discovery-search-query", ""], ["discovery-scene-filter", ""]]) {
+  for (const [id, label] of [["discovery-view-nav", "本周飙升"], ["discovery-view-nav", "最新发现"], ["discovery-view-nav", "场景探索"], ["discovery-search-query", ""], ["discovery-scene-filter", ""]]) {
     assert.match(indexSource, new RegExp(`id="${id}"`), `${id} should exist in the real shell`);
     if (label) assert.match(indexSource, new RegExp(label));
   }
@@ -233,7 +233,7 @@ test("index wires all project discovery views and loads its renderer before app.
   }
 });
 
-test("empty project feed hides the unused detail pane and expands the list", async () => {
+test("empty project feed hides the unused detail pane and preserves the directory width", async () => {
   const workspace = makeWorkspace({ request: async ({ url }) => url === "/api/content/status"
     ? { sources: [], coverage: {}, notices: [] }
     : { status: 200, data: feed([]), etag: '"empty"' } });
@@ -242,6 +242,9 @@ test("empty project feed hides the unused detail pane and expands the list", asy
 
   assert.equal(workspace.elements["discovery-columns"].attributes["data-layout"], "compact");
   assert.equal(workspace.elements["discovery-detail"].hidden, true);
+  const compact = cssSource.match(/#discovery-workspace \.discovery-columns\[data-layout="compact"\]\s*\{([^}]+)\}/)[1];
+  assert.match(compact, /grid-template-columns:\s*minmax\(280px, 340px\) minmax\(0, 1fr\)/);
+  assert.match(cssSource, /@media \(max-width: 760px\)[\s\S]*?\.discovery-columns\[data-layout="compact"\][\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
 
 test("loaded project feed keeps reader open with selection guidance", async () => {
@@ -267,7 +270,7 @@ test("first project collection failure collapses the blank reader and offers ret
 
   assert.equal(workspace.elements["discovery-columns"].attributes["data-layout"], "compact");
   assert.equal(workspace.elements["discovery-detail"].hidden, true);
-  assert.match(workspace.elements["discovery-cards"].textContent, /首次收录暂时不可用/);
+  assert.match(workspace.elements["discovery-cards"].textContent, /项目列表暂时不可用/);
   assert.match(workspace.elements["discovery-cards"].textContent, /搜索技能市场/);
   assert.ok(buttons(workspace.elements["discovery-cards"]).some((button) => button.textContent === "重试"));
   assert.doesNotMatch(workspace.elements["discovery-cards"].textContent, /0 个候选/);
@@ -319,7 +322,7 @@ test("project cards stay compact while the reader keeps localized dates and full
   await settle();
   const detail = workspace.elements["discovery-detail"].textContent;
   assert.match(detail, new RegExp(longSummary));
-  assert.match(detail, /项目创建：[^\n]*2026/);
+  assert.match(detail, /仓库创建：[^\n]*2026/);
   assert.match(detail, /总 Star：184/);
   assert.match(detail, /2026/);
   assert.doesNotMatch(detail, /2026-10-\d\dT/);
@@ -375,7 +378,7 @@ test("project views and fixed scenes update the C04 query, reset cursors, and ke
   assert.equal(workspace.elements["manage-workspace"].hidden, false);
 });
 
-test("compact project cards leave dates, repo Stars, growth windows and freshness for the reader", async () => {
+test("compact project cards show collection dates and leave repo Stars, growth windows and freshness for the reader", async () => {
   const entry = projectEntry("project_42", "acme/tools", standardProject());
   const metadata = {
     stale: false,
@@ -396,15 +399,15 @@ test("compact project cards leave dates, repo Stars, growth windows and freshnes
   card.click();
   await settle();
   const detail = workspace.elements["discovery-detail"];
-  assert.match(detail.textContent, /项目创建：[^\n]*2026/);
+  assert.match(detail.textContent, /仓库创建：[^\n]*2026/);
   assert.match(detail.textContent, /首次收录：[^\n]*2026/);
   assert.doesNotMatch(detail.textContent, /2026-10-\d\dT/);
   assert.match(detail.textContent, /总 Star：184（仓库级）/);
   assert.match(detail.textContent, /近 7 日新增 Star \+14/);
   assert.match(detail.textContent, /2026/);
   assert.match(detail.textContent, /28.*3/);
-  assert.match(detail.textContent, /GitHub 数据状态：等待更新/);
-  assert.match(detail.textContent, /最近成功更新 .*2026.*UTC/);
+  assert.match(detail.textContent, /GitHub 数据状态：请求受限/);
+  assert.match(detail.textContent, /数据检查点 .*2026.*UTC/);
   assert.doesNotMatch(detail.textContent, /2026-10-28T/);
   assert.doesNotMatch(detail.textContent, /2099-01-01/, "AIHOT and generic fetchedAt timestamps must not determine GitHub freshness");
 });
@@ -730,7 +733,7 @@ test("empty weekly feed explains that full week data is still being collected an
   activateDiscovery(workspace);
   await settle();
   assert.match(workspace.elements["discovery-cards"].textContent, /正在积累周数据/);
-  const toNew = buttons(workspace.elements["discovery-cards"]).find((button) => button.textContent === "新项目发现");
+  const toNew = buttons(workspace.elements["discovery-cards"]).find((button) => button.textContent === "最新发现");
   assert.ok(toNew);
   toNew.click();
   await settle();
@@ -766,7 +769,7 @@ test("feed and install failures stay visible without claiming an installation", 
   } });
   activateDiscovery(unavailable);
   await settle();
-  assert.match(unavailable.elements["discovery-cards"].textContent, /首次收录暂时不可用/);
+  assert.match(unavailable.elements["discovery-cards"].textContent, /项目列表暂时不可用/);
   assert.ok(buttons(unavailable.elements["discovery-cards"]).some((button) => button.textContent === "重试"));
 
   const entry = projectEntry("project_failure", "failure", standardProject({ skills: [skillRef("review/SKILL.md")] }));
@@ -857,4 +860,127 @@ test("complete net-only weekly fallback has its own explicit ranking title", asy
   workspace.window.SkillManagerContent.setFeedFilter("view", "scenarios");
   await settle();
   assert.doesNotMatch(workspace.elements["discovery-cards"].textContent, /近 7 日净增 Star 榜/);
+});
+
+test("latest discovery explains first collection and separates it from repository creation", async () => {
+  const entries = [projectEntry("modern", "Existing repository", standardProject({ createdAt: "2020-01-10T00:00:00Z", growth: null })), projectEntry("legacy", "Legacy repository", standardProject({ growth: null }), { discoveredAt: "" })];
+  const workspace = makeWorkspace({ request: async ({ url }) => url === "/api/content/status" ? {} : { status: 200, data: feed(entries) } });
+  activateDiscovery(workspace);
+  workspace.window.SkillManagerContent.setFeedFilter("view", "new");
+  await settle();
+  const cards = workspace.elements["discovery-cards"];
+  assert.match(cards.textContent, /按首次收录时间排序/);
+  assert.match(cards.textContent, /包含已有仓库/);
+  const rows = buttons(cards).filter((button) => button.dataset.entryId);
+  assert.match(rows[0].textContent, /首次收录：/);
+  assert.match(rows[0].textContent, /仓库创建：.*2020/);
+  assert.match(rows[0].textContent, /暂无有效增长数据/);
+  assert.doesNotMatch(rows[1].textContent, /首次收录：/);
+  assert.match(rows[1].textContent, /仓库创建：/);
+});
+
+test("new discovery without entries is an uncollected library with optional local actions", async () => {
+  const workspace = makeWorkspace();
+  activateDiscovery(workspace);
+  workspace.window.SkillManagerContent.setFeedFilter("view", "new");
+  await settle();
+  const cards = workspace.elements["discovery-cards"];
+  assert.match(cards.textContent, /尚无已收录项目/);
+  assert.doesNotMatch(cards.textContent, /当前条件|没有匹配/);
+  assert.ok(buttons(cards).some((button) => button.textContent === "场景探索"));
+  const count = workspace.requests.length;
+  buttons(cards).find((button) => button.textContent === "搜索技能市场").click();
+  await settle();
+  assert.equal(workspace.requests.length, count, "opening the market must not fetch online search results");
+  assert.deepEqual(workspace.searchTerms, [""]);
+});
+
+test("filtered empty discovery clears both filters with one feed request", async () => {
+  const workspace = makeWorkspace();
+  activateDiscovery(workspace);
+  const content = workspace.window.SkillManagerContent;
+  content.setFeedFilters({ view: "new", q: "missing", scene: "testing" });
+  await settle();
+  const cards = workspace.elements["discovery-cards"];
+  assert.match(cards.textContent, /当前筛选下没有匹配/);
+  const before = workspace.requests.length;
+  buttons(cards).find((button) => button.textContent === "清除筛选").click();
+  await settle();
+  assert.equal(content.session.project.q, "");
+  assert.equal(content.session.project.scene, "");
+  assert.equal(workspace.requests.length, before + 1);
+  assert.equal(workspace.searchTerms.length, 0);
+});
+
+test("rate limited empty discovery explains cached collection and local automatic retry time", async () => {
+  const retryAt = "2026-11-04T02:15:00Z";
+  const meta = { stale: true, sources: [{ name: "github", state: "rate_limited", lastSuccessAt: "2026-10-29T00:00:00Z", retryAt }] };
+  const workspace = makeWorkspace({ request: async ({ url }) => url === "/api/content/status" ? meta : { status: 200, data: feed([], "", meta) } });
+  activateDiscovery(workspace);
+  workspace.window.SkillManagerContent.setFeedFilter("view", "new");
+  await settle();
+  const text = workspace.elements["discovery-cards"].textContent + workspace.elements["discovery-meta-notices"].textContent;
+  assert.match(text, /请求受限/);
+  assert.match(text, /自动重试/);
+  assert.match(text, /已收录缓存/);
+  assert.match(text, /数据检查点/);
+  assert.doesNotMatch(text, /等待更新|当前条件下没有匹配/);
+  assert.ok(text.includes(new Date(retryAt).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" })));
+});
+
+test("initial discovery loading keeps the compact directory and hidden reader", async () => {
+  const workspace = makeWorkspace({ request: () => new Promise(() => {}) });
+  activateDiscovery(workspace);
+  assert.equal(workspace.elements["discovery-columns"].attributes["data-layout"], "compact");
+  assert.equal(workspace.elements["discovery-detail"].hidden, true);
+  assert.match(workspace.elements["discovery-cards"].textContent, /正在读取已收录项目/);
+});
+
+test("discovery fields stay adjacent with inherited light and dark theme tokens", () => {
+  const scene = cssSource.match(/\.discovery-search-form \.discovery-scene-field\s*\{([^}]+)\}/)[1];
+  assert.match(scene, /grid-template-columns:\s*auto minmax\(0, 1fr\)/);
+  assert.match(scene, /justify-self:\s*start/);
+  assert.match(scene, /width:\s*min\(100%, 220px\)/);
+  assert.match(cssSource, /\.discovery-search-form\s*\{[^}]*max-width:\s*400px/);
+  assert.match(cssSource, /\.discovery-empty\s*\{[^}]*color:\s*var\(--text\)/);
+  assert.match(cssSource, /\.discovery-empty-help\s*\{[^}]*color:\s*var\(--muted\)/);
+});
+
+test("elapsed GitHub retry checkpoint reports pending backend retry without promising a past schedule", async () => {
+  const meta = { sources: [{ name: "github", state: "rate_limited", retryAt: "2026-11-04T02:15:00Z" }] };
+  const workspace = makeWorkspace({ now: () => Date.parse("2026-11-04T03:00:00Z"), request: async ({ url }) => url === "/api/content/status" ? meta : { status: 200, data: feed([], "", meta) } });
+  activateDiscovery(workspace);
+  await settle();
+  const text = workspace.elements["discovery-meta-notices"].textContent + workspace.elements["discovery-status"].textContent;
+  assert.match(text, /请求受限/);
+  assert.match(text, /等待后台重试/);
+  assert.doesNotMatch(text, /自动重试/);
+});
+
+test("filtered cached discovery explains the filter before GitHub rate limiting", async () => {
+  for (const filters of [{ q: "missing" }, { scene: "testing" }]) {
+    const meta = { sources: [{ name: "github", state: "rate_limited" }], coverage: { candidates: 7, completeGrowth: 0 } };
+    const workspace = makeWorkspace({ request: async ({ url }) => url === "/api/content/status" ? meta : { status: 200, data: feed([], "", meta) } });
+    activateDiscovery(workspace);
+    workspace.window.SkillManagerContent.setFeedFilters({ view: "new", ...filters });
+    await settle();
+    const empty = descendants(workspace.elements["discovery-cards"]).find((node) => node.className === "content-empty discovery-empty");
+    assert.equal(empty.children[0].textContent, "当前筛选下没有匹配的项目。");
+    assert.match(empty.children[1].textContent, /GitHub 请求受限/);
+    assert.doesNotMatch(empty.children[0].textContent, /缓存中暂无|尚无已收录/);
+    assert.ok(buttons(empty).some((button) => button.textContent === "清除筛选"));
+  }
+});
+
+test("empty weekly cached discovery explains full-week qualification before GitHub rate limiting", async () => {
+  for (const completeGrowth of [0, 2]) {
+    const meta = { sources: [{ name: "github", state: "rate_limited" }], coverage: { candidates: 7, completeGrowth } };
+    const workspace = makeWorkspace({ request: async ({ url }) => url === "/api/content/status" ? meta : { status: 200, data: feed([], "", meta) } });
+    activateDiscovery(workspace);
+    await settle();
+    const empty = descendants(workspace.elements["discovery-cards"]).find((node) => node.className === "content-empty discovery-empty");
+    assert.match(empty.children[0].textContent, completeGrowth === 0 ? /正在积累周数据/ : /暂无符合完整 7 日增长要求/);
+    assert.match(empty.children[1].textContent, /GitHub 请求受限/);
+    assert.doesNotMatch(empty.children[0].textContent, /缓存中暂无|尚无已收录/);
+  }
 });

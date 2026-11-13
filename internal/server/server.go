@@ -221,7 +221,7 @@ type Server struct {
 	// Empty → anonymous skillsmp search (lower quota). Guarded by mu.
 	skillsmpKey string
 
-	// online-update check cache (guarded by mu): the configured feed
+	// online-update check cache (phase 6, guarded by mu): the company-private
 	// update feed is polled at most once per updateCheckTTL; results in between
 	// are served from this cache. Empty until the first successful check.
 	updateCache map[string]any
@@ -477,8 +477,8 @@ func saveSkillsmpKey(centralDir, key string) error {
 // @local/<name> → <target> mapping. Returns true if cfg was modified.
 func backfillAdoptedEnabled(cfg *config.Config, manifest *config.Manifest, personalStore string) bool {
 	storeAbs := harness.Expand(personalStore)
-	// Map an expanded dir back to its configured (user-facing) form, e.g.
-	// "/Users/x/.claude/skills" → "~/.claude/skills/". The UI matches an enabled
+	// Map an expanded dir back to its configured (user-facing) form, preserving
+	// home-relative targets such as "~/.claude/skills/". The UI matches an enabled
 	// entry's Target against the dropdown value (a config.Targets string) by exact
 	// string compare, so entries must carry that exact form or the checkbox state
 	// disagrees with the actual link.
@@ -757,6 +757,7 @@ func bustAssetCache(html []byte, version string) []byte {
 	html = bytes.ReplaceAll(html, []byte(`src="/content-news.js"`), []byte(`src="/content-news.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`src="/content-discovery.js"`), []byte(`src="/content-discovery.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`src="/node-dependency.js"`), []byte(`src="/node-dependency.js?v=`+version+`"`))
+	html = bytes.ReplaceAll(html, []byte(`src="/skill-check.js"`), []byte(`src="/skill-check.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`src="/content-reset-calendar.js"`), []byte(`src="/content-reset-calendar.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`src="/content-models.js"`), []byte(`src="/content-models.js?v=`+version+`"`))
 	html = bytes.ReplaceAll(html, []byte(`src="/app.js"`), []byte(`src="/app.js?v=`+version+`"`))

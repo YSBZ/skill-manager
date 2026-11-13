@@ -602,6 +602,32 @@ footer .error { color: var(--err); margin-top: 4px; }
 .node-dependency-restart { color: var(--muted); }
 .node-dependency-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 0 18px 16px; }
 #modal-content { margin: 12px 18px 18px; padding: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+.skill-detail-body { overflow: auto; min-height: 0; }
+.skill-check { margin: 14px 18px 0; border-top: 1px solid var(--line); padding-top: 12px; color: var(--body-text); font-size: 12px; line-height: 1.6; }
+.skill-check-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.skill-check h4, .skill-check h5 { margin: 0; color: var(--text); font-size: 13px; }
+.skill-check h5 { margin-top: 14px; }
+.skill-check p { margin: 5px 0; }
+.skill-check-note { color: var(--muted); }
+.skill-check-badge { display: inline-block; color: var(--muted); font-size: 11px; line-height: 1.6; margin-top: 6px; }
+.skill-check-checked { color: var(--ok); }
+.skill-check-issues, .skill-check-error { color: var(--err); }
+.skill-check-review, .skill-check-guidance { color: var(--warn); }
+.skill-check-paths { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: 4px 10px; margin: 10px 0; }
+.skill-check-paths dt { color: var(--muted); }
+.skill-check-paths dd { margin: 0; overflow-wrap: anywhere; }
+.skill-check-dependency, .skill-check-finding { border-left: 2px solid var(--line); padding: 4px 10px; margin-top: 8px; overflow-wrap: anywhere; }
+.skill-check-dependency-state { margin-left: 10px; color: var(--muted); }
+.skill-check-level-error { border-color: var(--err); }
+.skill-check-level-warning { border-color: var(--warn); }
+.skill-check-evidence { margin: 4px 0; color: var(--muted); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.skill-check button { flex-shrink: 0; }
+.skill-check button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+@media (max-width: 480px) {
+  .skill-check { margin-inline: 12px; }
+  .skill-check-paths { grid-template-columns: 1fr; gap: 2px; }
+  .skill-check-paths dd { margin-bottom: 6px; }
+}
 
 /* --- phase 3: 目录现状视图 + 添加抽屉 + toast --- */
 /* search + skill list are one module: tabs stay pinned above, this pane fills the
